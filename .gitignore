@@ -1,0 +1,21 @@
+# dependencies / build output
+node_modules/
+*.exe
+*.test
+web/.next/
+
+# สร้างอัตโนมัติจาก web/lab/src (npm run sync:lab) — แก้ที่ web/lab/src เท่านั้น
+web/public/skill-lab/
+
+# secrets / local config
+.env
+.env.*
+!.env.example
+
+# test artifacts
+web/lab/tests/out/
+
+# misc
+.DS_Store
+*.log
+*.tsbuildinfo
