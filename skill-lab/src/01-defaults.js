@@ -1,0 +1,673 @@
+/* ============================================================
+   MODULE 01 — defaults : ชุดข้อมูลเริ่มต้นทั้งหมด (คลาส / สายสกิล / สกิล / อาวุธ / สเตตัส / พรีเซ็ต / ม้อนสเตอร์)
+   ข้อมูลล้วน ๆ ไม่มีตรรกะ — เพิ่มคลาสหรือสกิลใหม่ที่นี่หรือผ่านหน้า "ตัวแก้ไขสกิล" ก็ได้
+   ฟิลด์ที่ไม่ใส่ จะถูกเติมค่าเริ่มต้นโดย store.normalize()
+============================================================ */
+(function(g){
+  const SL = g.SL = g.SL || {};
+  const lin = SL.util.lin;
+  const E = (stat, mode, value, appliesTo) => ({ stat, mode, value, appliesTo: appliesTo || 'self' });
+  const T = (stat, mult) => ({ stat, mult });
+
+  const classes = [
+    { id:'novice',   name:'ชาวบ้าน (Novice)', parent:'',       jobLvCap:10, pointsPerJobLv:1, desc:'จุดเริ่มต้น เปลี่ยนอาชีพได้เมื่อ Job Lv.10' },
+    { id:'swordman', name:'นักดาบ',           parent:'novice', jobLvCap:50, pointsPerJobLv:1, desc:'แถวหน้า HP สูง SP น้อย ใช้ cooldown และ HP เป็นทรัพยากร' },
+    { id:'thief',    name:'โจร',              parent:'novice', jobLvCap:50, pointsPerJobLv:1, desc:'คล่องตัวสูง ตีถี่ คริแรง ใช้ FLEE หลบหลีกและพิษเปิดช่องว่าง' },
+    { id:'archer',   name:'นักธนู',           parent:'novice', jobLvCap:50, pointsPerJobLv:1, desc:'ยิงไกลแม่นยำ เลือกปั้นได้ทั้งสายยิงถี่ สายคริเจาะเกราะ และสายกับดัก' },
+    { id:'mage',     name:'จอมเวท',           parent:'novice', jobLvCap:50, pointsPerJobLv:1, desc:'ดาเมจเวททะลุหลบหลีก ใช้ SP เป็นทรัพยากรหลัก พร้อม Magic Crit Triad และเกราะมานา' },
+  ];
+
+  const branches = [
+    { id:'nv_survive',  class:'novice',   name:'เอาตัวรอด' },
+    { id:'nv_combat',   class:'novice',   name:'สู้เบื้องต้น' },
+    { id:'nv_taste',    class:'novice',   name:'ลิ้มลองสายอาชีพ' },
+    { id:'sw_strike',   class:'swordman', name:'สายดาบ' },
+    { id:'sw_guard',    class:'swordman', name:'สายโล่' },
+    { id:'sw_berserk',  class:'swordman', name:'สายบ้าคลั่ง' },
+    { id:'th_blade',    class:'thief',    name:'สายกริช' },
+    { id:'th_shadow',   class:'thief',    name:'สายเงา & หลบหลีก' },
+    { id:'th_venom',    class:'thief',    name:'สายพิษ & เล่ห์กล' },
+    { id:'ar_rapid',    class:'archer',   name:'สายยิงเร็ว' },
+    { id:'ar_snipe',    class:'archer',   name:'สายซุ่มยิง' },
+    { id:'ar_survival', class:'archer',   name:'สายพราน & กับดัก' },
+    { id:'mg_elem',     class:'mage',     name:'สายเวทธาตุ' },
+    { id:'mg_arcane',   class:'mage',     name:'สายอาร์เคน & คริเวท' },
+    { id:'mg_mana',     class:'mage',     name:'สายมานา & ป้องกัน' },
+  ];
+
+  const skills = [
+    /* ---------------- Novice ---------------- */
+    { id:'nvHardy', class:'novice', name:'ร่างกายชาวบ้าน', desc:'เพิ่ม HP สูงสุดเป็น %', type:'passive', branch:'nv_survive', tier:1, jobLvReq:2, maxLevel:3,
+      effects:[ E('maxHp','percent',lin(0.03)) ] },
+    { id:'nvRest', class:'novice', name:'นั่งพักสมาธิ', desc:'ฟื้น HP ต่อวินาที และเพิ่ม SP สูงสุด %', type:'passive', branch:'nv_survive', tier:1, jobLvReq:2, maxLevel:3,
+      effects:[ E('hpRegen','flat',lin(0.05)), E('maxSp','percent',lin(0.03)) ] },
+    { id:'nvFirstAid', class:'novice', name:'ปฐมพยาบาล', desc:'ฟื้น HP ตัวเองเป็น % ของ HP สูงสุด', type:'active', branch:'nv_survive', tier:2, jobLvReq:4, maxLevel:3,
+      requires:[{id:'nvHardy', lv:1}], usage:{ sp:5, cooldown:15 }, heal:{ pctMaxHp:{base:0.02, step:0.01} } },
+    { id:'nvScrapper', class:'novice', name:'หมัดชาวบ้าน', desc:'เพิ่ม ATK แบน (ยกเว้นไม้เท้า)', type:'passive', branch:'nv_combat', tier:1, jobLvReq:2, maxLevel:3,
+      weaponReq:{ exclude:['staff'] }, effects:[ E('atk','flat',lin(2)) ] },
+    { id:'nvWits', class:'novice', name:'ไหวพริบชาวบ้าน', desc:'เพิ่ม HIT และ FLEE', type:'passive', branch:'nv_combat', tier:1, jobLvReq:2, maxLevel:3,
+      effects:[ E('hit','flat',lin(1)), E('flee','flat',lin(1)) ] },
+    { id:'nvStone', class:'novice', name:'ปาก้อนหิน', desc:'ยิงไกล ไม่ผูกอาวุธ ดาเมจจาก DEX และ STR', type:'active', branch:'nv_combat', tier:2, jobLvReq:4, maxLevel:3,
+      requires:[{id:'nvWits', lv:1}], usage:{ sp:3, cooldown:2 },
+      damage:{ kind:'physical', terms:[ T('dex',{base:0.6,step:0.12}), T('str',{base:0.2,step:0.04}) ] } },
+    { id:'nvStrongArms', class:'novice', name:'แขนแกร่ง', desc:'ลิ้มลองสายนักดาบ: ATK +2', type:'passive', branch:'nv_taste', tier:1, jobLvReq:2, maxLevel:1,
+      effects:[ E('atk','flat',2) ] },
+    { id:'nvLightSteps', class:'novice', name:'ย่องเบา', desc:'ลิ้มลองสายโจร: ASPD +1', type:'passive', branch:'nv_taste', tier:1, jobLvReq:2, maxLevel:1,
+      effects:[ E('aspd','flat',1) ] },
+    { id:'nvSharpEyes', class:'novice', name:'ตาไว', desc:'ลิ้มลองสายนักธนู: HIT +1.5', type:'passive', branch:'nv_taste', tier:1, jobLvReq:2, maxLevel:1,
+      effects:[ E('hit','flat',1.5) ] },
+    { id:'nvCalmMind', class:'novice', name:'จิตนิ่ง', desc:'ลิ้มลองสายจอมเวท: MATK +1.5%', type:'passive', branch:'nv_taste', tier:1, jobLvReq:2, maxLevel:1,
+      effects:[ E('matk','percent',0.015) ] },
+
+    /* ---------------- Swordman : Passive ---------------- */
+    { id:'swMastery', class:'swordman', name:'ชำนาญอาวุธประชิด', desc:'ATK แบนตามเลเวล (ยกเว้นไม้เท้า)', type:'passive', branch:'sw_strike', tier:1, jobLvReq:2, maxLevel:5,
+      weaponReq:{ exclude:['staff'] }, effects:[ E('atk','flat',lin(5)) ] },
+    { id:'swToughness', class:'swordman', name:'ร่างกายแกร่ง', desc:'DEF แบนตามเลเวล', type:'passive', branch:'sw_guard', tier:1, jobLvReq:2, maxLevel:5,
+      effects:[ E('def','flat',lin(2)) ] },
+    { id:'swRecovery', class:'swordman', name:'ฟื้นตัวนักรบ', desc:'ฟื้น HP ต่อวินาทีเพิ่มขึ้น', type:'passive', branch:'sw_guard', tier:2, jobLvReq:10, maxLevel:5,
+      requires:[{id:'swToughness', lv:2}], effects:[ E('hpRegen','flat',lin(0.15)) ] },
+    { id:'swTwoHand', class:'swordman', name:'ชำนาญสองมือ', desc:'ASPD +3/Lv เฉพาะอาวุธ 2 มือ (Lv5 ลบโทษ −15 ของดาบ 2 มือ)', type:'passive', branch:'sw_strike', tier:2, jobLvReq:10, maxLevel:5,
+      requires:[{id:'swMastery', lv:3}], weaponReq:{ slotType:'2H' }, effects:[ E('aspd','flat',lin(3)) ] },
+    { id:'swOpening', class:'swordman', name:'จังหวะเปิดช่อง', desc:'เพิ่มโอกาสคริติคอลกายภาพ', type:'passive', branch:'sw_berserk', tier:2, jobLvReq:10, maxLevel:5,
+      requires:[{id:'swMastery', lv:3}], effects:[ E('physCrit','flat',lin(1)) ] },
+    { id:'swShieldDisc', class:'swordman', name:'วินัยโล่', desc:'ต้องสวมโล่: DEF และโอกาสบล็อกเพิ่ม', type:'passive', branch:'sw_guard', tier:2, jobLvReq:10, maxLevel:5,
+      requires:[{id:'swToughness', lv:3}], needShield:true, effects:[ E('def','flat',lin(3)), E('blockChance','flat',lin(0.02)) ] },
+    { id:'swSoul', class:'swordman', name:'จิตวิญญาณนักรบบ้าคลั่ง', desc:'ATK แบนก้อนใหญ่ (capstone) ค่าเดิม +12/Lv ถูกลดเหลือ +9/Lv ตามผลตรวจ balance', type:'passive', branch:'sw_berserk', tier:4, jobLvReq:40, maxLevel:3,
+      requires:[{id:'swOpening', lv:3}], weaponReq:{ exclude:['staff'] }, effects:[ E('atk','flat',lin(9)) ] },
+
+    /* ---------------- Swordman : Active ---------------- */
+    { id:'swBash', class:'swordman', name:'ฟันกระแทก (Bash)', desc:'ฟันเป้าเดียว 130%→400% ATK', type:'active', branch:'sw_strike', tier:1, jobLvReq:2, maxLevel:10,
+      usage:{ sp:{table:[6,6,7,7,8,8,9,9,10,10]}, cooldown:3 },
+      damage:{ kind:'physical', terms:[ T('atk',{base:1.3,step:0.3}) ] }, hooks:{ stunChance:'ช่องเตรียมไว้ Lv6–10 (ยังไม่มีระบบสถานะ)' } },
+    { id:'swProvoke', class:'swordman', name:'ยั่วยุ', desc:'ลด DEF เป้าหมาย แต่เป้าหมายตีแรงขึ้น', type:'active', branch:'sw_berserk', tier:2, jobLvReq:10, maxLevel:5,
+      requires:[{id:'swBash', lv:2}], usage:{ sp:8, cooldown:12, duration:20 }, group:'provoke',
+      effects:[ E('def','percent',lin(-0.06),'target'), E('atk','percent',lin(0.04),'target') ] },
+    { id:'swMagnum', class:'swordman', name:'ระเบิดคลื่นดาบ', desc:'AoE รอบตัว เสีย HP แลกดาเมจ และได้ ATK เพิ่มชั่วคราว', type:'active', branch:'sw_strike', tier:3, jobLvReq:25, maxLevel:5,
+      requires:[{id:'swBash', lv:5},{id:'swProvoke', lv:2}], usage:{ sp:{base:20,step:2}, hp:0.04, cooldown:6, duration:8 }, group:'aftermath',
+      damage:{ kind:'physical', terms:[ T('atk',{base:1.2,step:0.3}) ], aoe:true },
+      effects:[ E('atk','percent',lin(0.03)) ], hooks:{ knockback:2 } },
+    { id:'swShieldBash', class:'swordman', name:'กระแทกโล่', desc:'ต้องสวมโล่: 110% ATK + DEF×(0.5+0.3×Lv)', type:'active', branch:'sw_guard', tier:3, jobLvReq:25, maxLevel:5,
+      requires:[{id:'swShieldDisc', lv:3},{id:'swBash', lv:3}], needShield:true, usage:{ sp:{base:12,step:1}, cooldown:4 },
+      damage:{ kind:'physical', terms:[ T('atk',1.1), T('def',{base:0.8,step:0.3}) ] } },
+
+    /* ---------------- Swordman : Buff / Toggle / Trigger ---------------- */
+    { id:'swEndure', class:'swordman', name:'อดทน', desc:'ลดดาเมจกายภาพที่ได้รับ และเพิ่ม MDEF', type:'buff', branch:'sw_guard', tier:2, jobLvReq:10, maxLevel:5,
+      requires:[{id:'swToughness', lv:3}], usage:{ sp:12, cooldown:45, duration:{base:15,step:5} }, group:'guard',
+      effects:[ E('physReduction','flat',lin(0.05)), E('mdef','flat',lin(2)) ] },
+    { id:'swBattleCry', class:'swordman', name:'ตะโกนศึก', desc:'เพิ่ม ATK% และ HIT', type:'buff', branch:'sw_strike', tier:3, jobLvReq:25, maxLevel:5,
+      requires:[{id:'swProvoke', lv:3}], usage:{ sp:15, cooldown:90, duration:30 }, group:'warcry',
+      effects:[ E('atk','percent',lin(0.04)), E('hit','flat',lin(4)) ], hooks:{ partyShare:'ช่องเตรียมไว้สำหรับปาร์ตี้' } },
+    { id:'swBerserk', class:'swordman', name:'ท่าบ้าคลั่ง', desc:'toggle: ATK เพิ่ม แลกกับดาเมจที่รับเพิ่มและ HP ไหลทุกวินาที', type:'toggle', branch:'sw_berserk', tier:3, jobLvReq:25, maxLevel:5,
+      requires:[{id:'swOpening', lv:3},{id:'swProvoke', lv:3}], usage:{ sp:10, hpDrain:0.003 }, group:'stance',
+      toggleOff:{ hpBelow:0.15 }, effects:[ E('atk','percent',lin(0.06)), E('damageTaken','flat',lin(0.05)) ] },
+    { id:'swLastStand', class:'swordman', name:'สู้ตาย', desc:'trigger: เมื่อ HP ต่ำกว่า 25% ATK เพิ่ม จนกว่า HP จะเกิน 50%', type:'trigger', branch:'sw_berserk', tier:4, jobLvReq:40, maxLevel:5,
+      requires:[{id:'swBerserk', lv:3}], trigger:{ hpBelow:0.25, hpAbove:0.5, cooldown:90 }, group:'laststand',
+      effects:[ E('atk','percent',lin(0.08)) ] },
+
+    /* ---------------- Thief : Passive ---------------- */
+    { id:'thMastery', class:'thief', name:'ชำนาญกริช', desc:'ATK แบนตามเลเวล เฉพาะสายอาวุธประชิด (ยกเว้นไม้เท้า)', type:'passive', branch:'th_blade', tier:1, jobLvReq:2, maxLevel:5,
+      weaponReq:{ exclude:['staff'] }, effects:[ E('atk','flat',lin(3)) ] },
+    { id:'thAgility', class:'thief', name:'ฝึกความคล่องตัว', desc:'เพิ่ม ASPD แบนตามเลเวล ตีได้ถี่ขึ้น', type:'passive', branch:'th_shadow', tier:1, jobLvReq:2, maxLevel:5,
+      effects:[ E('aspd','flat',lin(1.5)) ] },
+    { id:'thEvasion', class:'thief', name:'หลบหลีกชำนาญ', desc:'เพิ่ม FLEE แบนตามเลเวล หลบการโจมตีกายภาพได้ดีขึ้น', type:'passive', branch:'th_shadow', tier:2, jobLvReq:10, maxLevel:5,
+      requires:[{id:'thAgility', lv:3}], effects:[ E('flee','flat',lin(4)) ] },
+    { id:'thDouble', class:'thief', name:'ชำนาญมีดคู่จังหวะสอง', desc:'เฉพาะกริช: เพิ่ม ASPD และ HIT จากการฟันซ้ำจังหวะเร็ว', type:'passive', branch:'th_blade', tier:2, jobLvReq:10, maxLevel:5,
+      requires:[{id:'thMastery', lv:3}], weaponReq:{ include:['dagger'] }, effects:[ E('aspd','flat',lin(1.5)), E('hit','flat',lin(2)) ] },
+    { id:'thWeakSpot', class:'thief', name:'เล็งจุดตาย', desc:'เพิ่ม Phys Crit และเจาะเกราะ DEF เป้าหมาย', type:'passive', branch:'th_blade', tier:2, jobLvReq:10, maxLevel:5,
+      requires:[{id:'thMastery', lv:2}], effects:[ E('physCrit','flat',lin(1.5)), E('defPen','flat',lin(0.02)) ] },
+    { id:'thVenomLore', class:'thief', name:'ศาสตร์พิษสังหาร', desc:'เพิ่ม ATK% และฟื้น SP ต่อวินาทีจากการสกัดพิษ', type:'passive', branch:'th_venom', tier:2, jobLvReq:10, maxLevel:5,
+      requires:[{id:'thQuickStrike', lv:3}], effects:[ E('atk','percent',lin(0.02)), E('spRegen','flat',lin(0.2)) ] },
+    { id:'thShadowStrike', class:'thief', name:'จู่โจมเงา', desc:'เพิ่มโอกาสคริติคอลและ ATK แบนก้อนใหญ่ (capstone)', type:'passive', branch:'th_blade', tier:4, jobLvReq:40, maxLevel:3,
+      requires:[{id:'thWeakSpot', lv:3}], weaponReq:{ exclude:['staff'] }, effects:[ E('physCrit','flat',lin(3)), E('atk','flat',lin(4)) ] },
+
+    /* ---------------- Thief : Active ---------------- */
+    { id:'thQuickStrike', class:'thief', name:'ฟันฉับพลัน', desc:'จ้วงแทงอย่างรวดเร็ว 130%→355% ATK คูลดาวน์สั้น', type:'active', branch:'th_blade', tier:1, jobLvReq:2, maxLevel:10,
+      weaponReq:{ exclude:['staff','bow'] }, usage:{ sp:{table:[5,5,6,6,7,7,8,8,9,9]}, cooldown:2.5 },
+      damage:{ kind:'physical', terms:[ T('atk',{base:1.3,step:0.25}) ] } },
+    { id:'thEnvenom', class:'thief', name:'อาบพิษเชือดเฉือน', desc:'โจมตีพร้อมพิษกัดกร่อน ลด DEF เป้าหมายและทำให้รับดาเมจแรงขึ้น', type:'active', branch:'th_venom', tier:1, jobLvReq:2, maxLevel:5,
+      weaponReq:{ exclude:['staff','bow'] }, usage:{ sp:{base:8,step:1}, cooldown:8, duration:16 }, group:'poison',
+      damage:{ kind:'physical', terms:[ T('atk',{base:1.3,step:0.2}) ], alwaysHit:true },
+      effects:[ E('damageTaken','flat',lin(0.03),'target'), E('def','percent',lin(-0.04),'target') ] },
+    { id:'thSandAttack', class:'thief', name:'สาดทรายพรางตา', desc:'สาดทรายใส่หน้าศัตรู ลด HIT และ FLEE เป้าหมายลงอย่างมาก', type:'active', branch:'th_venom', tier:2, jobLvReq:10, maxLevel:5,
+      requires:[{id:'thAgility', lv:2}], usage:{ sp:7, cooldown:12, duration:18 }, group:'blind',
+      damage:{ kind:'physical', terms:[ T('atk',{base:1.1,step:0.15}) ] },
+      effects:[ E('hit','flat',lin(-5),'target'), E('flee','flat',lin(-5),'target') ], hooks:{ blindChance:'ช่องเตรียมไว้สำหรับสถานะตาบอด' } },
+    { id:'thBackstab', class:'thief', name:'แทงข้างหลัง (Backstab)', desc:'อ้อมแทงจุดตาย ไม่พลาดเป้า ดาเมจหนักจาก ATK และ AGI', type:'active', branch:'th_blade', tier:3, jobLvReq:25, maxLevel:5,
+      requires:[{id:'thQuickStrike', lv:5},{id:'thWeakSpot', lv:3}], weaponReq:{ include:['dagger'] }, usage:{ sp:{base:12,step:2}, cooldown:4.5 },
+      damage:{ kind:'physical', terms:[ T('atk',{base:2.0,step:0.35}), T('agi',{base:0.5,step:0.15}) ], alwaysHit:true } },
+
+    /* ---------------- Thief : Buff / Toggle / Trigger ---------------- */
+    { id:'thVenomCoat', class:'thief', name:'เคลือบพิษสังหาร', desc:'เคลือบพิษลงบนอาวุธ เพิ่ม ATK% และเจาะเกราะ DEF', type:'buff', branch:'th_venom', tier:3, jobLvReq:25, maxLevel:5,
+      requires:[{id:'thEnvenom', lv:3},{id:'thVenomLore', lv:2}], weaponReq:{ exclude:['staff','bow'] }, usage:{ sp:14, cooldown:45, duration:30 }, group:'coat',
+      effects:[ E('atk','percent',lin(0.05)), E('defPen','flat',lin(0.03)) ] },
+    { id:'thSmoke', class:'thief', name:'ระเบิดควันอำพราง', desc:'สร้างม่านควัน เพิ่ม FLEE ก้อนใหญ่และลดดาเมจกายภาพที่ได้รับ', type:'buff', branch:'th_shadow', tier:3, jobLvReq:25, maxLevel:5,
+      requires:[{id:'thEvasion', lv:3},{id:'thSandAttack', lv:2}], usage:{ sp:15, cooldown:40, duration:{base:12,step:2} }, group:'guard',
+      effects:[ E('flee','flat',lin(8)), E('physReduction','flat',lin(0.04)) ] },
+    { id:'thShadowDance', class:'thief', name:'ระบำเงาเร้นกาย', desc:'toggle: เร่ง ASPD และ Phys Crit สูงขึ้น แลกกับกิน SP ต่อวินาที', type:'toggle', branch:'th_shadow', tier:3, jobLvReq:25, maxLevel:5,
+      requires:[{id:'thDouble', lv:3},{id:'thEvasion', lv:2}], usage:{ sp:8, spDrain:0.6 }, group:'stance',
+      toggleOff:{ hpBelow:0.1 }, effects:[ E('aspd','flat',lin(2)), E('physCrit','flat',lin(2)) ] },
+    { id:'thCheatDeath', class:'thief', name:'สัญชาตญาณเอาตัวรอด', desc:'trigger: เมื่อ HP ต่ำกว่า 30% เร่ง FLEE และลดดาเมจที่รับทันที', type:'trigger', branch:'th_shadow', tier:4, jobLvReq:40, maxLevel:5,
+      requires:[{id:'thSmoke', lv:3}], trigger:{ hpBelow:0.3, hpAbove:0.6, cooldown:75 }, group:'laststand',
+      effects:[ E('flee','flat',lin(10)), E('physReduction','flat',lin(0.05)) ] },
+
+    /* ---------------- Archer : Passive ---------------- */
+    { id:'arOwlEye', class:'archer', name:'ตานกฮูก', desc:'เพิ่ม DEX และ HIT แบนตามเลเวล', type:'passive', branch:'ar_snipe', tier:1, jobLvReq:2, maxLevel:5,
+      effects:[ E('dex','flat',lin(2)), E('hit','flat',lin(3)) ] },
+    { id:'arBowMastery', class:'archer', name:'ชำนาญธนู', desc:'เฉพาะธนู: เพิ่ม ATK แบนตามเลเวล', type:'passive', branch:'ar_rapid', tier:1, jobLvReq:2, maxLevel:5,
+      weaponReq:{ include:['bow'] }, effects:[ E('atk','flat',lin(4)) ] },
+    { id:'arVultureEye', class:'archer', name:'ตาพญาแร้ง', desc:'อ่านทิศทางลม เพิ่ม HIT และ Phys Crit', type:'passive', branch:'ar_snipe', tier:2, jobLvReq:10, maxLevel:5,
+      requires:[{id:'arOwlEye', lv:3}], effects:[ E('hit','flat',lin(3)), E('physCrit','flat',lin(1.5)) ] },
+    { id:'arRapidFire', class:'archer', name:'น้าวสายฉับไว', desc:'เฉพาะธนู: เพิ่ม ASPD แบนตามเลเวล ยิงถี่ขึ้น', type:'passive', branch:'ar_rapid', tier:2, jobLvReq:10, maxLevel:5,
+      requires:[{id:'arBowMastery', lv:3}], weaponReq:{ include:['bow'] }, effects:[ E('aspd','flat',lin(3)) ] },
+    { id:'arVitalShot', class:'archer', name:'เล็งจุดอ่อนเกราะ', desc:'เพิ่มโอกาสคริติคอลและเจาะเกราะ DEF เป้าหมาย', type:'passive', branch:'ar_snipe', tier:2, jobLvReq:10, maxLevel:5,
+      requires:[{id:'arOwlEye', lv:2}], effects:[ E('physCrit','flat',lin(1.5)), E('defPen','flat',lin(0.03)) ] },
+    { id:'arRangerStep', class:'archer', name:'ฝีเท้าพรานป่า', desc:'เพิ่ม FLEE และฟื้น SP ต่อวินาทีเมื่อเคลื่อนที่ยิง', type:'passive', branch:'ar_survival', tier:2, jobLvReq:10, maxLevel:5,
+      requires:[{id:'arAnkleSnare', lv:2}], effects:[ E('flee','flat',lin(3)), E('spRegen','flat',lin(0.25)) ] },
+    { id:'arHunterInstinct', class:'archer', name:'สัญชาตญาณนักล่า', desc:'เพิ่ม ATK แบนก้อนใหญ่และ Phys Crit (capstone)', type:'passive', branch:'ar_rapid', tier:4, jobLvReq:40, maxLevel:3,
+      requires:[{id:'arRapidFire', lv:3}], weaponReq:{ exclude:['staff'] }, effects:[ E('atk','flat',lin(8)), E('physCrit','flat',lin(2)) ] },
+
+    /* ---------------- Archer : Active ---------------- */
+    { id:'arDoubleStrafe', class:'archer', name:'ยิงคู่ (Double Strafe)', desc:'เฉพาะธนู: ยิงลูกธนูคู่ 145%→370% ATK แม่นยำและรุนแรง', type:'active', branch:'ar_rapid', tier:1, jobLvReq:2, maxLevel:10,
+      weaponReq:{ include:['bow'] }, usage:{ sp:{table:[6,6,7,7,8,8,9,9,10,10]}, cooldown:2.6 },
+      damage:{ kind:'physical', terms:[ T('atk',{base:1.45,step:0.25}) ] } },
+    { id:'arAnkleSnare', class:'archer', name:'บ่วงดักสัตว์', desc:'วางกับดักตรึงขา ลด FLEE และ DEF ของเป้าหมายลง พร้อมให้รับดาเมจเพิ่มขึ้น', type:'active', branch:'ar_survival', tier:1, jobLvReq:2, maxLevel:5,
+      usage:{ sp:9, cooldown:12, duration:16 }, group:'trap',
+      damage:{ kind:'physical', terms:[ T('dex',{base:0.7,step:0.2}) ], alwaysHit:true, noCrit:true },
+      effects:[ E('flee','flat',lin(-8),'target'), E('def','percent',lin(-0.05),'target'), E('damageTaken','flat',lin(0.02),'target') ], hooks:{ rootSec:4 } },
+    { id:'arArrowShower', class:'archer', name:'ห่าฝนธนู (Arrow Shower)', desc:'เฉพาะธนู: ยิงลูกธนูโปรยเป็นวงกว้าง AoE พร้อมผลักศัตรู', type:'active', branch:'ar_rapid', tier:3, jobLvReq:25, maxLevel:5,
+      requires:[{id:'arDoubleStrafe', lv:5},{id:'arRapidFire', lv:2}], weaponReq:{ include:['bow'] }, usage:{ sp:{base:12,step:2}, cooldown:4 },
+      damage:{ kind:'physical', terms:[ T('atk',{base:1.4,step:0.3}) ], aoe:true }, hooks:{ knockback:2 } },
+    { id:'arPiercingShot', class:'archer', name:'ศรทะลวงเกราะ', desc:'เฉพาะธนู: ยิงศรหัวเหล็กทะลวงเป้า ดาเมจจาก ATK และ DEX ไม่พลาดเป้า', type:'active', branch:'ar_snipe', tier:3, jobLvReq:25, maxLevel:5,
+      requires:[{id:'arVultureEye', lv:3},{id:'arVitalShot', lv:3}], weaponReq:{ include:['bow'] }, usage:{ sp:{base:12,step:2}, cooldown:5.5, duration:10 }, group:'pierceMark',
+      damage:{ kind:'physical', terms:[ T('atk',{base:1.8,step:0.3}), T('dex',{base:0.6,step:0.15}) ], alwaysHit:true },
+      effects:[ E('def','percent',lin(-0.05),'target') ] },
+
+    /* ---------------- Archer : Buff / Toggle / Trigger ---------------- */
+    { id:'arConcentrate', class:'archer', name:'ตั้งสมาธิ (Improve Concentration)', desc:'รวบรวมสมาธิ เพิ่ม ATK%, HIT และ DEX ชั่วคราว', type:'buff', branch:'ar_snipe', tier:3, jobLvReq:25, maxLevel:5,
+      requires:[{id:'arVultureEye', lv:3},{id:'arOwlEye', lv:3}], usage:{ sp:16, cooldown:60, duration:35 }, group:'focus',
+      effects:[ E('atk','percent',lin(0.04)), E('hit','flat',lin(5)), E('dex','flat',lin(3)) ] },
+    { id:'arWindWalk', class:'archer', name:'ก้าวสายลม', desc:'เคลื่อนไหวดั่งสายลม เพิ่ม FLEE, ASPD และ ATK%', type:'buff', branch:'ar_survival', tier:3, jobLvReq:25, maxLevel:5,
+      requires:[{id:'arRangerStep', lv:3}], usage:{ sp:14, cooldown:45, duration:30 }, group:'wind',
+      effects:[ E('flee','flat',lin(6)), E('aspd','flat',lin(2.5)), E('atk','percent',lin(0.03)) ], hooks:{ partyShare:'ช่องเตรียมไว้สำหรับปาร์ตี้' } },
+    { id:'arSniperStance', class:'archer', name:'ท่าเล็งประณีต', desc:'toggle: เพิ่ม ATK% และ Phys Crit สูงขึ้น แลกกับกิน SP ต่อวินาที', type:'toggle', branch:'ar_snipe', tier:3, jobLvReq:25, maxLevel:5,
+      requires:[{id:'arVitalShot', lv:3}], usage:{ sp:10, spDrain:0.6 }, group:'stance',
+      toggleOff:{ hpBelow:0.15 }, effects:[ E('atk','percent',lin(0.05)), E('physCrit','flat',lin(2.5)) ] },
+    { id:'arEvasiveRoll', class:'archer', name:'ดีดตัวถอยฉาก', desc:'trigger: เมื่อ HP ต่ำกว่า 35% เพิ่ม FLEE และลดดาเมจกายภาพทันที', type:'trigger', branch:'ar_survival', tier:4, jobLvReq:40, maxLevel:5,
+      requires:[{id:'arWindWalk', lv:3}], trigger:{ hpBelow:0.35, hpAbove:0.65, cooldown:60 }, group:'laststand',
+      effects:[ E('flee','flat',lin(12)), E('physReduction','flat',lin(0.05)) ] },
+
+    /* ---------------- Mage : Passive ---------------- */
+    { id:'mgSpellMastery', class:'mage', name:'ชำนาญเวทมนตร์', desc:'เพิ่ม MATK% ตามเลเวล', type:'passive', branch:'mg_elem', tier:1, jobLvReq:2, maxLevel:5,
+      effects:[ E('matk','percent',lin(0.025)) ] },
+    { id:'mgManaTraining', class:'mage', name:'ฝึกพลังมานา', desc:'เพิ่ม SP สูงสุด % และอัตราฟื้น SP ต่อวินาที', type:'passive', branch:'mg_mana', tier:1, jobLvReq:2, maxLevel:5,
+      effects:[ E('maxSp','percent',lin(0.04)), E('spRegen','flat',lin(0.35)) ] },
+    { id:'mgArcaneFocus', class:'mage', name:'สมาธิเวทอาร์เคน', desc:'เพิ่มโอกาสคริติคอลเวท (Magic Crit) โดยตรง', type:'passive', branch:'mg_arcane', tier:2, jobLvReq:10, maxLevel:5,
+      requires:[{id:'mgSpellMastery', lv:3}], effects:[ E('magicCrit','flat',lin(1.5)) ] },
+    { id:'mgInsight', class:'mage', name:'ความเข้าใจทะลุเกราะเวท', desc:'เพิ่ม MDEF Ignore ตอนติดคริเวท', type:'passive', branch:'mg_arcane', tier:2, jobLvReq:10, maxLevel:5,
+      requires:[{id:'mgManaTraining', lv:2}], effects:[ E('mdefIgnore','flat',lin(0.03)) ] },
+    { id:'mgElemMastery', class:'mage', name:'ประสานธาตุธรรมชาติ', desc:'เพิ่ม MATK แบนและ INT ตามเลเวล', type:'passive', branch:'mg_elem', tier:2, jobLvReq:10, maxLevel:5,
+      requires:[{id:'mgSpellMastery', lv:2}], effects:[ E('matk','flat',lin(4)), E('int','flat',lin(2)) ] },
+    { id:'mgMindWard', class:'mage', name:'เกราะจิตคุ้มกาย', desc:'เพิ่ม MDEF และ HP สูงสุด % ช่วยให้จอมเวททนขึ้น', type:'passive', branch:'mg_mana', tier:2, jobLvReq:10, maxLevel:5,
+      requires:[{id:'mgManaTraining', lv:3}], effects:[ E('mdef','flat',lin(4)), E('maxHp','percent',lin(0.03)) ] },
+    { id:'mgArchmageWisdom', class:'mage', name:'ปัญญาจอมเวทชั้นสูง', desc:'เพิ่มแรงคริเวท (Crit Dmg Bonus) และ MATK% ก้อนใหญ่ (capstone)', type:'passive', branch:'mg_arcane', tier:4, jobLvReq:40, maxLevel:3,
+      requires:[{id:'mgArcaneFocus', lv:3},{id:'mgInsight', lv:3}], effects:[ E('critDmg','flat',lin(0.05)), E('matk','percent',lin(0.04)) ] },
+
+    /* ---------------- Mage : Active ---------------- */
+    { id:'mgFireBolt', class:'mage', name:'ศรเพลิง (Fire Bolt)', desc:'ยิงชุดลูกไฟเวทมนตร์ 110%→290% MATK เป้าเดียว', type:'active', branch:'mg_elem', tier:1, jobLvReq:2, maxLevel:10,
+      usage:{ sp:{table:[10,11,12,13,14,15,16,18,20,22]}, cooldown:3.0 },
+      damage:{ kind:'magic', terms:[ T('matk',{base:1.1,step:0.2}) ] } },
+    { id:'mgFrostNova', class:'mage', name:'ระเบิดน้ำแข็ง (Frost Diver)', desc:'แช่แข็งเป้าหมาย ทำดาเมจเวทและลด MDEF กับ ATK ของศัตรู', type:'active', branch:'mg_elem', tier:2, jobLvReq:10, maxLevel:5,
+      requires:[{id:'mgFireBolt', lv:3}], usage:{ sp:{base:12,step:2}, cooldown:10, duration:16 }, group:'frost',
+      damage:{ kind:'magic', terms:[ T('matk',{base:1.0,step:0.15}) ] },
+      effects:[ E('mdef','percent',lin(-0.07),'target'), E('atk','percent',lin(-0.03),'target') ], hooks:{ freezeChance:'ช่องเตรียมไว้สำหรับสถานะแช่แข็ง' } },
+    { id:'mgThunderStorm', class:'mage', name:'พายุสายฟ้า (Thunderstorm)', desc:'ฟาดสายฟ้าลงพื้นที่ AoE รุนแรง ดาเมจจาก MATK', type:'active', branch:'mg_elem', tier:3, jobLvReq:25, maxLevel:5,
+      requires:[{id:'mgFireBolt', lv:5},{id:'mgElemMastery', lv:3}], usage:{ sp:{base:22,step:3}, cooldown:5.5 },
+      damage:{ kind:'magic', terms:[ T('matk',{base:1.25,step:0.22}) ], aoe:true } },
+    { id:'mgSoulStrike', class:'mage', name:'กระสุนวิญญาณ (Soul Strike)', desc:'ยิงพลังงานอาร์เคนรัวเร็ว ดาเมจจาก MATK และ INT พร้อมเจาะเกราะเวท', type:'active', branch:'mg_arcane', tier:3, jobLvReq:25, maxLevel:5,
+      requires:[{id:'mgArcaneFocus', lv:3},{id:'mgInsight', lv:2}], usage:{ sp:{base:12,step:2}, cooldown:2.6, duration:10 }, group:'arcaneMark',
+      damage:{ kind:'magic', terms:[ T('matk',{base:1.4,step:0.25}), T('int',{base:0.8,step:0.2}) ] },
+      effects:[ E('mdef','percent',lin(-0.05),'target') ] },
+
+    /* ---------------- Mage : Buff / Toggle / Trigger ---------------- */
+    { id:'mgEnergyCoat', class:'mage', name:'เกราะพลังงาน (Energy Coat)', desc:'สร้างม่านพลังมานา ลดดาเมจกายภาพที่ได้รับและเพิ่ม MDEF', type:'buff', branch:'mg_mana', tier:2, jobLvReq:10, maxLevel:5,
+      requires:[{id:'mgManaTraining', lv:3}], usage:{ sp:20, cooldown:45, duration:{base:20,step:5} }, group:'guard',
+      effects:[ E('physReduction','flat',lin(0.06)), E('mdef','flat',lin(4)) ] },
+    { id:'mgAmplify', class:'mage', name:'เร่งพลังเวทมนตร์ (Mystical Amplification)', desc:'เพิ่ม MATK% และโอกาส Magic Crit ชั่วคราว', type:'buff', branch:'mg_arcane', tier:3, jobLvReq:25, maxLevel:5,
+      requires:[{id:'mgArcaneFocus', lv:3}], usage:{ sp:20, cooldown:50, duration:30 }, group:'amp',
+      effects:[ E('matk','percent',lin(0.05)), E('magicCrit','flat',lin(2)) ] },
+    { id:'mgOvercharge', class:'mage', name:'โอเวอร์ชาร์จมานา', desc:'toggle: เร่ง MATK% และแรงคริเวทสูงขึ้น แลกกับกิน SP ต่อวินาที', type:'toggle', branch:'mg_arcane', tier:3, jobLvReq:25, maxLevel:5,
+      requires:[{id:'mgInsight', lv:3},{id:'mgElemMastery', lv:2}], usage:{ sp:12, spDrain:1.2 }, group:'stance',
+      toggleOff:{ hpBelow:0.15 }, effects:[ E('matk','percent',lin(0.06)), E('critDmg','flat',lin(0.04)) ] },
+    { id:'mgManaSurge', class:'mage', name:'คลื่นมานาฉุกเฉิน', desc:'trigger: เมื่อ HP ต่ำกว่า 35% เร่งการฟื้น SP และลดดาเมจที่รับทันที', type:'trigger', branch:'mg_mana', tier:4, jobLvReq:40, maxLevel:5,
+      requires:[{id:'mgEnergyCoat', lv:3},{id:'mgMindWard', lv:3}], trigger:{ hpBelow:0.35, hpAbove:0.7, cooldown:60 }, group:'laststand',
+      effects:[ E('spRegen','flat',lin(1.5)), E('physReduction','flat',lin(0.05)), E('hpRegen','flat',lin(0.5)) ] },
+  ];
+
+  const weapons = [
+    { id:'unarmed',  name:'มือเปล่า',   slotType:'1H', damageType:'blunt',  weaponClass:'unarmed' },
+    { id:'sword_1h', name:'ดาบ 1 มือ', slotType:'1H', damageType:'slash',  weaponClass:'sword' },
+    { id:'sword_2h', name:'ดาบ 2 มือ', slotType:'2H', damageType:'slash',  weaponClass:'sword' },
+    { id:'axe',      name:'ขวาน',      slotType:'1H', damageType:'slash',  weaponClass:'axe' },
+    { id:'mace',     name:'กระบอง',    slotType:'1H', damageType:'blunt',  weaponClass:'mace' },
+    { id:'dagger',   name:'กริช',      slotType:'1H', damageType:'pierce', weaponClass:'dagger' },
+    { id:'bow',      name:'ธนู',       slotType:'2H', damageType:'pierce', weaponClass:'bow' },
+    { id:'staff',    name:'ไม้เท้า',   slotType:'2H', damageType:'magic',  weaponClass:'staff' },
+  ];
+
+  // kind: num = ตัวเลขปกติ | frac = เศษส่วน (0.05 = 5%) | pct = หน่วยเป็น % อยู่แล้ว (7 = 7%)
+  const statDefs = [
+    { id:'str', name:'STR', group:'สเตตัสหลัก', kind:'num' }, { id:'agi', name:'AGI', group:'สเตตัสหลัก', kind:'num' },
+    { id:'vit', name:'VIT', group:'สเตตัสหลัก', kind:'num' }, { id:'int', name:'INT', group:'สเตตัสหลัก', kind:'num' },
+    { id:'dex', name:'DEX', group:'สเตตัสหลัก', kind:'num' }, { id:'luk', name:'LUK', group:'สเตตัสหลัก', kind:'num' },
+    { id:'atk', name:'ATK', group:'โจมตี', kind:'num' }, { id:'matk', name:'MATK', group:'โจมตี', kind:'num' },
+    { id:'hit', name:'HIT', group:'โจมตี', kind:'num' }, { id:'aspd', name:'ASPD', group:'โจมตี', kind:'num' },
+    { id:'physCrit', name:'Phys Crit %', group:'โจมตี', kind:'pct' }, { id:'magicCrit', name:'Magic Crit %', group:'โจมตี', kind:'pct' },
+    { id:'mdefIgnore', name:'MDEF Ignore (คริเวท)', group:'โจมตี', kind:'frac' }, { id:'critDmg', name:'Crit Dmg Bonus (เวท)', group:'โจมตี', kind:'frac' },
+    { id:'defPen', name:'DEF Penetration', group:'โจมตี', kind:'frac' },
+    { id:'def', name:'DEF', group:'ป้องกัน', kind:'num' }, { id:'mdef', name:'MDEF', group:'ป้องกัน', kind:'num' },
+    { id:'flee', name:'FLEE', group:'ป้องกัน', kind:'num' }, { id:'blockChance', name:'Block Chance', group:'ป้องกัน', kind:'frac' },
+    { id:'physReduction', name:'ลดดาเมจกายภาพ', group:'ป้องกัน', kind:'frac' }, { id:'damageTaken', name:'ดาเมจที่รับเพิ่ม', group:'ป้องกัน', kind:'frac' },
+    { id:'maxHp', name:'HP สูงสุด', group:'ทรัพยากร', kind:'num' }, { id:'maxSp', name:'SP สูงสุด', group:'ทรัพยากร', kind:'num' },
+    { id:'hpRegen', name:'HP regen/วิ', group:'ทรัพยากร', kind:'num' }, { id:'spRegen', name:'SP regen/วิ', group:'ทรัพยากร', kind:'num' },
+  ];
+
+  const base = { str:1,agi:1,vit:1,int:1,dex:1,luk:1, atk:0,matk:0,hit:0,aspd:0,physCrit:0,magicCrit:0,mdefIgnore:0,critDmg:0,defPen:0,
+    def:0,mdef:0,flee:0,blockChance:0,physReduction:0,damageTaken:0,maxHp:0,maxSp:0,hpRegen:0,spRegen:0 };
+  const mk = (o) => Object.assign({}, base, o);
+  // ค่าตัวอย่างคำนวณจากสูตรของ Status Lab (นักดาบ Lv50, STR40 AGI40 VIT30 INT30 DEX40 LUK20)
+  const presets = [
+    { id:'sw50_1h', name:'นักดาบ Lv50 · ดาบ 1 มือ', weaponId:'sword_1h', hasShield:false,
+      sheet: mk({ str:40,agi:40,vit:30,int:30,dex:40,luk:20, atk:40,matk:75,hit:90,aspd:120,physCrit:7,magicCrit:2.7,mdefIgnore:0.58,critDmg:0.124,
+        def:14.4,mdef:15,flee:88,maxHp:1904,maxSp:384,hpRegen:1.5,spRegen:1.5 }) },
+    { id:'sw50_shield', name:'นักดาบ Lv50 · ดาบ+โล่', weaponId:'sword_1h', hasShield:true,
+      sheet: mk({ str:40,agi:40,vit:30,int:30,dex:40,luk:20, atk:40,matk:75,hit:90,aspd:115,physCrit:7,magicCrit:2.7,mdefIgnore:0.58,critDmg:0.124,
+        def:29,mdef:15,flee:88,blockChance:0.15,maxHp:1904,maxSp:384,hpRegen:1.5,spRegen:1.5 }) },
+    { id:'sw50_2h', name:'นักดาบ Lv50 · ดาบ 2 มือ', weaponId:'sword_2h', hasShield:false,
+      sheet: mk({ str:40,agi:40,vit:30,int:30,dex:40,luk:20, atk:56,matk:75,hit:90,aspd:105,physCrit:7,magicCrit:2.7,mdefIgnore:0.58,critDmg:0.124,
+        def:14.8,mdef:15,flee:88,maxHp:1904,maxSp:384,hpRegen:1.5,spRegen:1.5 }) },
+    { id:'th50_dagger', name:'โจร Lv50 · กริช', weaponId:'dagger', hasShield:false,
+      sheet: mk({ str:30,agi:50,vit:20,int:20,dex:35,luk:35, atk:45.5,matk:50,hit:85,aspd:132,physCrit:16.5,magicCrit:15.75,mdefIgnore:0.57,critDmg:0.116,
+        def:10,mdef:10,flee:100.5,maxHp:1364,maxSp:504,hpRegen:1.0,spRegen:2.2 }) },
+    { id:'ar50_bow', name:'นักธนู Lv50 · ธนู', weaponId:'bow', hasShield:false,
+      sheet: mk({ str:20,agi:45,vit:20,int:20,dex:50,luk:30, atk:50,matk:50,hit:115,aspd:128,physCrit:10,magicCrit:13.5,mdefIgnore:0.60,critDmg:0.116,
+        def:10,mdef:10,flee:95,maxHp:1240,maxSp:560,hpRegen:1.0,spRegen:2.5 }) },
+    { id:'mg50_staff', name:'จอมเวท Lv50 · ไม้เท้า', weaponId:'staff', hasShield:false,
+      sheet: mk({ str:10,agi:25,vit:20,int:50,dex:40,luk:35, atk:1,matk:135,hit:90,aspd:114,physCrit:11.5,magicCrit:15.75,mdefIgnore:0.58,critDmg:0.14,
+        def:10,mdef:25,flee:80.5,maxHp:744,maxSp:1120,hpRegen:0.8,spRegen:4.5 }) },
+    { id:'novice10', name:'ชาวบ้าน Lv10 · มือเปล่า', weaponId:'unarmed', hasShield:false,
+      sheet: mk({ str:10,agi:8,vit:8,int:5,dex:10,luk:5, atk:5,matk:12,hit:60,aspd:103,physCrit:2.5,magicCrit:0.7,mdefIgnore:0.52,critDmg:0.104,
+        def:4,mdef:2.5,flee:58,maxHp:296,maxSp:120,hpRegen:0.4,spRegen:0.6 }) },
+  ];
+
+  const monsters = [
+    { id:'dummy', name:'ดัมมี่ธรรมดา', element:'neutral', size:'medium', exp:{ base:15, job:10 }, gold:[5, 12],
+      drops:[{ itemId:'card_poring', chance:0.20 }, { itemId:'pot_red', chance:0.35 }],
+      def:40,  mdef:30,  flee:60, maxHp:20000,  atk:80,  hit:100, interval:2.0,
+      world:{ bodyType:'dummy', color:'#c99c67', scale:1.0, moveSpeed:0, aggroRange:0, attackRange:65,
+        telegraph:{ name:'คลื่นกระแทกฝึกซ้อม', cd:8, castTime:1.4, shape:'circle', radius:105, angle:360, mult:1.5 } } },
+    { id:'poring', name:'สไลม์ปอริ่ง', element:'water', size:'small', exp:{ base:45, job:35 }, gold:[15, 35],
+      drops:[{ itemId:'etc_jellopy', chance:0.65 }, { itemId:'eq_hat_apple', chance:0.25 }, { itemId:'card_marina', chance:0.25 }, { itemId:'pot_red', chance:0.45 }],
+      def:15,  mdef:20,  flee:45, maxHp:1800,   atk:42,  hit:75,  interval:2.2,
+      world:{ bodyType:'slime', color:'#f27ca4', scale:0.9, moveSpeed:85, aggroRange:190, attackRange:58,
+        telegraph:{ name:'กระโดดทับเด้งดึ๋ง', cd:7, castTime:1.3, shape:'circle', radius:90, angle:360, mult:1.8 } } },
+    { id:'treant', name:'ภูตพฤกษาโบราณ', element:'nature', size:'medium', exp:{ base:95, job:75 }, gold:[30, 65],
+      drops:[{ itemId:'etc_jellopy', chance:0.50 }, { itemId:'card_dryad', chance:0.28 }, { itemId:'eq_boots_hermes', chance:0.22 }, { itemId:'pot_blue', chance:0.40 }],
+      def:45,  mdef:40,  flee:55, maxHp:4200,   atk:85,  hit:90,  interval:1.9,
+      world:{ bodyType:'slime', color:'#48bb78', scale:1.08, moveSpeed:95, aggroRange:210, attackRange:64,
+        telegraph:{ name:'รากไม้หนามพันธนาการ', cd:7, castTime:1.25, shape:'circle', radius:105, angle:360, mult:1.85 } } },
+    { id:'wolf', name:'หมาป่าเขี้ยวเงา', element:'earth', size:'medium', exp:{ base:140, job:110 }, gold:[45, 90],
+      drops:[{ itemId:'etc_fang', chance:0.55 }, { itemId:'eq_robe_ninja', chance:0.25 }, { itemId:'card_vadon', chance:0.25 }, { itemId:'eq_cape_wind', chance:0.22 }],
+      def:65,  mdef:35,  flee:85, maxHp:6200,   atk:115, hit:105, interval:1.6,
+      world:{ bodyType:'wolf', color:'#6e7b91', scale:1.05, moveSpeed:145, aggroRange:250, attackRange:68,
+        telegraph:{ name:'พุ่งขย้ำเส้นตรง', cd:6.5, castTime:1.1, shape:'line', radius:170, angle:44, mult:2.0 } } },
+    { id:'ice_wolf', name:'หมาป่าเขี้ยวเหมันต์', element:'ice', size:'medium', exp:{ base:220, job:175 }, gold:[75, 140],
+      drops:[{ itemId:'etc_ice_heart', chance:0.55 }, { itemId:'card_hatii', chance:0.28 }, { itemId:'eq_armor_aqua', chance:0.25 }, { itemId:'pot_aspd', chance:0.35 }],
+      def:85,  mdef:55,  flee:95, maxHp:11500,  atk:145, hit:115, interval:1.55,
+      world:{ bodyType:'wolf', color:'#63b3ed', scale:1.12, moveSpeed:155, aggroRange:260, attackRange:70,
+        telegraph:{ name:'คมเขี้ยวพายุหิมะ', cd:6.0, castTime:1.1, shape:'cone', radius:145, angle:65, mult:2.05 } } },
+    { id:'wraith', name:'ภูตวิญญาณเร่ร่อน', element:'ghost', size:'medium', exp:{ base:290, job:240 }, gold:[95, 180],
+      drops:[{ itemId:'etc_ectoplasm', chance:0.50 }, { itemId:'card_whisper', chance:0.30 }, { itemId:'eq_ring_arcane', chance:0.25 }, { itemId:'pot_blue', chance:0.50 }],
+      def:35,  mdef:90,  flee:115, maxHp:14500, atk:165, hit:125, interval:1.7,
+      world:{ bodyType:'slime', color:'#b794f4', scale:1.1, moveSpeed:130, aggroRange:250, attackRange:72,
+        telegraph:{ name:'กรีดร้องวิญญาณหลอน', cd:7.0, castTime:1.2, shape:'circle', radius:125, angle:360, mult:2.1 } } },
+    { id:'skeleton', name:'อัศวินโครงกระดูกต้องสาป', element:'undead', size:'medium', exp:{ base:340, job:270 }, gold:[110, 210],
+      drops:[{ itemId:'etc_oridecon', chance:0.45 }, { itemId:'card_angeling', chance:0.28 }, { itemId:'card_bathory', chance:0.25 }, { itemId:'eq_ring_str', chance:0.25 }],
+      def:130, mdef:45,  flee:70, maxHp:24000,  atk:180, hit:120, interval:1.65,
+      world:{ bodyType:'golem', color:'#a0aec0', scale:1.15, moveSpeed:115, aggroRange:240, attackRange:74,
+        telegraph:{ name:'ดาบคำสาปผีดิบ', cd:7.5, castTime:1.25, shape:'line', radius:180, angle:48, mult:2.15 } } },
+    { id:'armor', name:'หุ่นเกราะหนา', element:'shadow', size:'large', exp:{ base:380, job:290 }, gold:[120, 240],
+      drops:[{ itemId:'etc_oridecon', chance:0.50 }, { itemId:'eq_armor_odin', chance:0.30 }, { itemId:'card_hydra', chance:0.25 }, { itemId:'eq_greaves_titan', chance:0.25 }],
+      def:200, mdef:60,  flee:30, maxHp:40000,  atk:150, hit:110, interval:2.5,
+      world:{ bodyType:'golem', color:'#6f8596', scale:1.25, moveSpeed:70, aggroRange:210, attackRange:78,
+        telegraph:{ name:'ทุบแผ่นดินไหว', cd:9, castTime:1.6, shape:'circle', radius:135, angle:360, mult:2.2 } } },
+    { id:'thunder_golem', name:'โกเลมสายฟ้าอัสนี', element:'lightning', size:'large', exp:{ base:520, job:410 }, gold:[180, 350],
+      drops:[{ itemId:'etc_oridecon', chance:0.55 }, { itemId:'card_griffon', chance:0.32 }, { itemId:'eq_cape_dragon', chance:0.28 }, { itemId:'eq_ring_crit', chance:0.28 }],
+      def:240, mdef:95,  flee:55, maxHp:58000,  atk:230, hit:130, interval:2.1,
+      world:{ bodyType:'golem', color:'#f6e05e', scale:1.32, moveSpeed:85, aggroRange:240, attackRange:82,
+        telegraph:{ name:'ระเบิดสนามแม่เหล็กอัสนี', cd:8, castTime:1.4, shape:'circle', radius:150, angle:360, mult:2.3 } } },
+    { id:'boss',  name:'บอสทดสอบ (มังกรเพลิง)', element:'fire', size:'large', exp:{ base:1500, job:1200 }, gold:[600, 1200],
+      drops:[{ itemId:'etc_dragon_scale', chance:0.85 }, { itemId:'eq_helm_valkyrie', chance:0.50 }, { itemId:'eq_crown_archmage', chance:0.50 }, { itemId:'card_bapho', chance:0.45 }, { itemId:'eq_armor_ignis', chance:0.45 }],
+      def:400, mdef:150, flee:80, maxHp:150000, atk:400, hit:140, interval:1.8,
+      world:{ bodyType:'dragon', color:'#d94e41', scale:1.55, moveSpeed:105, aggroRange:310, attackRange:95,
+        telegraph:{ name:'ลมหายใจมังกรเพลิง', cd:7.5, castTime:1.5, shape:'cone', radius:190, angle:75, mult:2.4 } } },
+  ];
+
+  // ระบบธาตุทั้ง 13 ธาตุ และตารางแพ้-ชนะทางแบบละเอียด (13×13 Elemental Weakness & Advantage Matrix)
+  const elementSystem = {
+    elements: [
+      { id:'neutral',   icon:'⚪', name:'ไร้ธาตุ (Neutral)',       color:'#cbd5e0', desc:'สมดุลทุกธาตุ แต่ตีมอนสเตอร์ธาตุวิญญาณ (Ghost) แทบไม่เข้า (×0.25)' },
+      { id:'fire',      icon:'🔥', name:'ไฟ (Fire)',              color:'#fc8181', desc:'ชนะทาง: ดิน (×1.5), พืช (×1.75), น้ำแข็ง (×1.75), ผีดิบ (×1.75) · แพ้ทาง: น้ำ (×0.5)' },
+      { id:'water',     icon:'💧', name:'น้ำ (Water)',             color:'#63b3ed', desc:'ชนะทาง: ไฟ (×1.75), ดิน (×1.25) · แพ้ทาง: สายฟ้า (×0.5), พืช (×0.5), น้ำแข็ง (×0.5)' },
+      { id:'earth',     icon:'🪨', name:'ดิน (Earth)',             color:'#d69e2e', desc:'ชนะทาง: ลม (×1.5), สายฟ้า (×1.75), พิษ (×1.25) · แพ้ทาง: ไฟ (×0.5), พืช (×0.5)' },
+      { id:'wind',      icon:'🌪️', name:'ลม (Wind)',              color:'#68d391', desc:'ชนะทาง: น้ำ (×1.5), พืช (×1.25) · แพ้ทาง: ดิน (×0.5), น้ำแข็ง (×0.75)' },
+      { id:'ice',       icon:'❄️', name:'น้ำแข็ง (Ice)',           color:'#90cdf4', desc:'ชนะทาง: พืช (×1.75), ลม (×1.5), ดิน (×1.25), น้ำ (×1.25) · แพ้ทาง: ไฟ (×0.5), สายฟ้า (×0.5)' },
+      { id:'lightning', icon:'⚡', name:'สายฟ้า (Lightning)',     color:'#ecc94b', desc:'ชนะทาง: น้ำ (×1.75), น้ำแข็ง (×1.5), ลม (×1.25) · แพ้ทาง: ดิน (×0.25), พืช (×0.5)' },
+      { id:'nature',    icon:'🌿', name:'พืช/ธรรมชาติ (Nature)',   color:'#48bb78', desc:'ชนะทาง: น้ำ (×1.75), ดิน (×1.75), วิญญาณ (×1.25) · แพ้ทาง: ไฟ (×0.25), น้ำแข็ง (×0.5), พิษ (×0.5)' },
+      { id:'poison',    icon:'☠️', name:'พิษ (Poison)',           color:'#b794f4', desc:'ชนะทาง: พืช (×1.75), ไฟ/น้ำ/ลม (×1.25) · แพ้ทาง: ผีดิบ (×0.0), ศักดิ์สิทธิ์ (×0.5), ดิน (×0.75)' },
+      { id:'holy',      icon:'✨', name:'ศักดิ์สิทธิ์ (Holy)',      color:'#fef08a', desc:'ชนะทาง: ผีดิบ (×2.0!), ความมืด (×1.75), วิญญาณ (×1.5), พิษ (×1.25) · แพ้ทาง: ศักดิ์สิทธิ์ด้วยกัน (×0.0)' },
+      { id:'shadow',    icon:'🌑', name:'ความมืด (Shadow)',        color:'#7f9cf5', desc:'ชนะทาง: ศักดิ์สิทธิ์ (×1.75), วิญญาณ (×1.5), พืช (×1.25) · แพ้ทาง: ความมืด (×0.0), ผีดิบ (×0.25)' },
+      { id:'undead',    icon:'💀', name:'ผีดิบ/คำสาป (Undead)',    color:'#a0aec0', desc:'ชนะทาง: พืช (×1.5), วิญญาณ (×1.5), ศักดิ์สิทธิ์ (×1.25) · แพ้ทาง: ศักดิ์สิทธิ์/ไฟ, ต้านพิษ/ผีดิบ (×0.0)' },
+      { id:'ghost',     icon:'👻', name:'วิญญาณ/อาร์เคน (Ghost)',  color:'#e9d8fd', desc:'ชนะทาง: วิญญาณ (×1.75!), ผีดิบ (×1.5), จิตใจ · เกราะวิญญาณลดดาเมจไร้ธาตุเหลือ ×0.25!' }
+    ],
+    // ตารางตัวคูณธาตุ 13×13: matrix[ธาตุโจมตี][ธาตุเป้าหมาย]
+    matrix: {
+      neutral:   { neutral:1.0,  fire:1.0,  water:1.0,  earth:1.0,  wind:1.0,  ice:1.0,  lightning:1.0,  nature:1.0,  poison:1.0,  holy:1.0,  shadow:1.0,  undead:1.0,  ghost:0.25 },
+      fire:      { neutral:1.0,  fire:0.25, water:0.5,  earth:1.5,  wind:1.0,  ice:1.75, lightning:1.0,  nature:1.75, poison:1.25, holy:0.75, shadow:1.0,  undead:1.75, ghost:1.0  },
+      water:     { neutral:1.0,  fire:1.5,  water:0.25, earth:1.0,  wind:0.5,  ice:0.5,  lightning:0.5,  nature:0.5,  poison:1.0,  holy:0.75, shadow:1.0,  undead:1.0,  ghost:1.0  },
+      earth:     { neutral:1.0,  fire:0.5,  water:1.0,  earth:0.25, wind:1.5,  ice:0.75, lightning:1.75, nature:0.5,  poison:1.25, holy:0.75, shadow:1.0,  undead:1.0,  ghost:1.0  },
+      wind:      { neutral:1.0,  fire:1.0,  water:1.5,  earth:0.5,  wind:0.25, ice:0.75, lightning:0.75, nature:1.25, poison:1.25, holy:0.75, shadow:1.0,  undead:1.0,  ghost:1.0  },
+      ice:       { neutral:1.0,  fire:0.5,  water:1.25, earth:1.25, wind:1.5,  ice:0.25, lightning:0.5,  nature:1.75, poison:1.0,  holy:0.75, shadow:1.0,  undead:1.0,  ghost:1.0  },
+      lightning: { neutral:1.0,  fire:1.0,  water:1.75, earth:0.25, wind:1.25, ice:1.5,  lightning:0.25, nature:0.5,  poison:1.0,  holy:0.75, shadow:1.0,  undead:1.25, ghost:1.25 },
+      nature:    { neutral:1.0,  fire:0.25, water:1.75, earth:1.75, wind:0.75, ice:0.5,  lightning:1.25, nature:0.25, poison:0.5,  holy:1.0,  shadow:1.0,  undead:0.75, ghost:1.25 },
+      poison:    { neutral:1.0,  fire:1.25, water:1.25, earth:0.75, wind:1.25, ice:1.0,  lightning:1.0,  nature:1.75, poison:0.0,  holy:0.5,  shadow:0.5,  undead:0.0,  ghost:0.75 },
+      holy:      { neutral:1.0,  fire:1.0,  water:1.0,  earth:1.0,  wind:1.0,  ice:1.0,  lightning:1.0,  nature:1.0,  poison:1.25, holy:0.0,  shadow:1.75, undead:2.0,  ghost:1.5  },
+      shadow:    { neutral:1.0,  fire:1.0,  water:1.0,  earth:1.0,  wind:1.0,  ice:1.0,  lightning:1.0,  nature:1.25, poison:0.5,  holy:1.75, shadow:0.0,  undead:0.25, ghost:1.5  },
+      undead:    { neutral:1.0,  fire:0.5,  water:1.0,  earth:1.0,  wind:1.0,  ice:1.25, lightning:1.0,  nature:1.5,  poison:0.0,  holy:1.25, shadow:0.5,  undead:0.0,  ghost:1.5  },
+      ghost:     { neutral:1.0,  fire:1.0,  water:1.0,  earth:1.0,  wind:1.0,  ice:1.0,  lightning:1.0,  nature:1.0,  poison:1.0,  holy:1.25, shadow:1.25, undead:1.5,  ghost:1.75 }
+    },
+    // ตารางขนาดอาวุธ vs ขนาดมอนสเตอร์ (small, medium, large)
+    sizeMatrix: {
+      unarmed:  { small:1.0,  medium:1.0,  large:0.75 },
+      dagger:   { small:1.0,  medium:0.75, large:0.50 },
+      sword_1h: { small:0.75, medium:1.0,  large:0.75 },
+      sword_2h: { small:0.75, medium:0.75, large:1.0  },
+      axe:      { small:0.50, medium:0.75, large:1.0  },
+      mace:     { small:0.75, medium:1.0,  large:1.0  },
+      bow:      { small:1.0,  medium:1.0,  large:0.75 },
+      staff:    { small:1.0,  medium:1.0,  large:1.0  }
+    }
+  };
+
+  // ระบบไอเทมสวมใส่ 6 ช่อง, การ์ดธาตุทั้ง 12 ชนิด และยาฟื้นฟู (Equipment, Elemental Cards & Consumables)
+  const equipItems = [
+    /* --- 1. หมวก (Headgear) --- */
+    { id:'eq_helm_valkyrie',  slot:'headgear', rarity:'legendary', price:850, icon:'👑', name:'👑 หมวกเกราะวัลคีรี',     desc:'ATK +10%, DEF +25, MaxHP +300', hatType:'helm',
+      effects:[{ stat:'atk', mode:'percent', value:0.10 }, { stat:'def', mode:'flat', value:25 }, { stat:'maxHp', mode:'flat', value:300 }] },
+    { id:'eq_hat_apple',      slot:'headgear', rarity:'rare',      price:320, icon:'🍎', name:'🍎 หมวกแอปเปิ้ลนักธนู',   desc:'HIT +18, ASPD +6, CRIT +6%', hatType:'feather',
+      effects:[{ stat:'hit', mode:'flat', value:18 }, { stat:'aspd', mode:'flat', value:6 }, { stat:'physCrit', mode:'flat', value:6 }] },
+    { id:'eq_crown_archmage', slot:'headgear', rarity:'legendary', price:880, icon:'🔮', name:'🔮 มงกุฎจอมเวทโบราณ',    desc:'MATK +15%, MaxSP +200, คริเวท +8%', hatType:'wizard',
+      effects:[{ stat:'matk', mode:'percent', value:0.15 }, { stat:'maxSp', mode:'flat', value:200 }, { stat:'magicCrit', mode:'flat', value:8 }] },
+    { id:'eq_hood_phantom',   slot:'headgear', rarity:'epic',      price:540, icon:'🎭', name:'🎭 ฮู้ดนักฆ่าไร้เงา',      desc:'CRIT +10%, FLEE +22, ASPD +5', hatType:'hood',
+      effects:[{ stat:'physCrit', mode:'flat', value:10 }, { stat:'flee', mode:'flat', value:22 }, { stat:'aspd', mode:'flat', value:5 }] },
+
+    /* --- 2. ชุดเกราะ & เกราะธาตุ (Armor & Elemental Armor) --- */
+    { id:'eq_armor_odin',     slot:'armor',    rarity:'legendary', price:900, icon:'🛡️', name:'🛡️ เกราะศักดิ์สิทธิ์โอดิน', desc:'เปลี่ยนธาตุป้องกันเป็น ศักดิ์สิทธิ์ ✨ · MaxHP +18%, DEF +40, MDEF +20', tunicColor:'#2b6cb0', defenseElement:'holy',
+      effects:[{ stat:'maxHp', mode:'percent', value:0.18 }, { stat:'def', mode:'flat', value:40 }, { stat:'mdef', mode:'flat', value:20 }] },
+    { id:'eq_robe_ninja',     slot:'armor',    rarity:'epic',      price:520, icon:'🥷', name:'🥷 ชุดคลุมนินจาเงา',      desc:'เปลี่ยนธาตุป้องกันเป็น ความมืด 🌑 · ASPD +9, FLEE +28, CRIT +8%', tunicColor:'#2d3748', defenseElement:'shadow',
+      effects:[{ stat:'aspd', mode:'flat', value:9 }, { stat:'flee', mode:'flat', value:28 }, { stat:'physCrit', mode:'flat', value:8 }] },
+    { id:'eq_armor_ignis',    slot:'armor',    rarity:'epic',      price:650, icon:'🔥', name:'🔥 เกราะเกล็ดมังกรเพลิง',  desc:'เปลี่ยนธาตุป้องกันเป็น ไฟ 🔥 (ลดดาเมจไฟ 75%!) · ATK +8%, DEF +35, MaxHP +250', tunicColor:'#c53030', defenseElement:'fire',
+      effects:[{ stat:'atk', mode:'percent', value:0.08 }, { stat:'def', mode:'flat', value:35 }, { stat:'maxHp', mode:'flat', value:250 }] },
+    { id:'eq_armor_aqua',     slot:'armor',    rarity:'rare',      price:480, icon:'❄️', name:'❄️ เสื้อคลุมผลึกเหมันต์',   desc:'เปลี่ยนธาตุป้องกันเป็น น้ำแข็ง ❄️ · MATK +10%, MDEF +30, ฟื้น SP +2/วิ', tunicColor:'#3182ce', defenseElement:'ice',
+      effects:[{ stat:'matk', mode:'percent', value:0.10 }, { stat:'mdef', mode:'flat', value:30 }, { stat:'spRegen', mode:'flat', value:2.0 }] },
+
+    /* --- 3. ผ้าคลุมไหล่ (Garment) --- */
+    { id:'eq_cape_wind',      slot:'garment',  rarity:'rare',      price:380, icon:'🧣', name:'🧣 ผ้าคลุมปีกสายลม',      desc:'FLEE +25, ASPD +6, ลดดาเมจกายภาพ +4%', capeColor:'#38a169',
+      effects:[{ stat:'flee', mode:'flat', value:25 }, { stat:'aspd', mode:'flat', value:6 }, { stat:'physReduction', mode:'flat', value:0.04 }] },
+    { id:'eq_cape_dragon',    slot:'garment',  rarity:'epic',      price:620, icon:'🦇', name:'🦇 ผ้าคลุมราชันย์มังกร',   desc:'ATK +8%, MATK +8%, MaxHP +10%, ลดดาเมจกายภาพ +6%', capeColor:'#9b2c2c',
+      effects:[{ stat:'atk', mode:'percent', value:0.08 }, { stat:'matk', mode:'percent', value:0.08 }, { stat:'maxHp', mode:'percent', value:0.10 }, { stat:'physReduction', mode:'flat', value:0.06 }] },
+
+    /* --- 4. รองเท้า (Footgear) --- */
+    { id:'eq_boots_hermes',   slot:'footgear', rarity:'epic',      price:490, icon:'👢', name:'👢 รองเท้าติดปีกเฮอร์มีส',  desc:'ASPD +8, FLEE +18, ฟื้น HP +4/วิ, ฟื้น SP +1.5/วิ',
+      effects:[{ stat:'aspd', mode:'flat', value:8 }, { stat:'flee', mode:'flat', value:18 }, { stat:'hpRegen', mode:'flat', value:4 }, { stat:'spRegen', mode:'flat', value:1.5 }] },
+    { id:'eq_greaves_titan',  slot:'footgear', rarity:'rare',      price:420, icon:'🥾', name:'🥾 สนับแข้งไททันเหล็กไหล', desc:'MaxHP +12%, DEF +28, โอกาสบล็อกโล่ +6%',
+      effects:[{ stat:'maxHp', mode:'percent', value:0.12 }, { stat:'def', mode:'flat', value:28 }, { stat:'blockChance', mode:'flat', value:0.06 }] },
+
+    /* --- 5. เครื่องประดับ (Accessory) --- */
+    { id:'eq_ring_str',       slot:'accessory', rarity:'rare',     price:360, icon:'💍', name:'💍 แหวนพละกำลังแห่งยักษ์', desc:'STR +8, ATK +12%, เจาะเกราะ DEF +6%',
+      effects:[{ stat:'str', mode:'flat', value:8 }, { stat:'atk', mode:'percent', value:0.12 }, { stat:'defPen', mode:'flat', value:0.06 }] },
+    { id:'eq_ring_crit',      slot:'accessory', rarity:'epic',     price:550, icon:'💎', name:'💎 สร้อยคอประกายดาวคริ',   desc:'CRIT กายภาพ +12%, คริเวท +8%, ASPD +5',
+      effects:[{ stat:'physCrit', mode:'flat', value:12 }, { stat:'magicCrit', mode:'flat', value:8 }, { stat:'aspd', mode:'flat', value:5 }] },
+    { id:'eq_ring_arcane',    slot:'accessory', rarity:'epic',     price:560, icon:'📿', name:'📿 ลูกแก้วมนตราอาร์เคน',   desc:'INT +8, MATK +14%, เจาะ MDEF ตอนติดคริ +8%',
+      effects:[{ stat:'int', mode:'flat', value:8 }, { stat:'matk', mode:'percent', value:0.14 }, { stat:'mdefIgnore', mode:'flat', value:0.08 }] },
+
+    /* --- 6. การ์ดเสียบอาวุธ & เคลือบธาตุ (Weapon Cards — ครบทุกธาตุ!) --- */
+    { id:'card_poring',       slot:'card', rarity:'common',    price:120, icon:'🃏', name:'🃏 การ์ดปอริ่งนำโชค (ไร้ธาตุ)', desc:'CRIT +5%, FLEE +10, MaxHP +100', attackElement:'',
+      effects:[{ stat:'physCrit', mode:'flat', value:5 }, { stat:'flee', mode:'flat', value:10 }, { stat:'maxHp', mode:'flat', value:100 }] },
+    { id:'card_hydra',        slot:'card', rarity:'rare',      price:380, icon:'🃏', name:'🃏 การ์ดไฮดราจอมพลัง (ไร้ธาตุ)', desc:'ATK +15%, MATK +12%', attackElement:'',
+      effects:[{ stat:'atk', mode:'percent', value:0.15 }, { stat:'matk', mode:'percent', value:0.12 }] },
+    { id:'card_vadon',        slot:'card', rarity:'rare',      price:340, icon:'🔥', name:'🔥 การ์ดอัศวินเพลิง (เคลือบธาตุไฟ)', desc:'เปลี่ยนการโจมตีเป็นธาตุไฟ 🔥 + ATK +8% (ชนะดิน/พืช/น้ำแข็ง/ผีดิบ ×1.5–1.75!)', attackElement:'fire',
+      effects:[{ stat:'atk', mode:'percent', value:0.08 }] },
+    { id:'card_marina',       slot:'card', rarity:'rare',      price:340, icon:'💧', name:'💧 การ์ดวารีสมุทร (เคลือบธาตุน้ำ)', desc:'เปลี่ยนการโจมตีเป็นธาตุน้ำ 💧 + ATK +8% (ชนะธาตุไฟ ×1.5!)', attackElement:'water',
+      effects:[{ stat:'atk', mode:'percent', value:0.08 }] },
+    { id:'card_sandman',      slot:'card', rarity:'rare',      price:340, icon:'🪨', name:'🪨 การ์ดโกเลมศิลา (เคลือบธาตุดิน)', desc:'เปลี่ยนการโจมตีเป็นธาตุดิน 🪨 + ATK +8%, DEF +15 (ชนะลม/สายฟ้า ×1.5–1.75!)', attackElement:'earth',
+      effects:[{ stat:'atk', mode:'percent', value:0.08 }, { stat:'def', mode:'flat', value:15 }] },
+    { id:'card_bapho',        slot:'card', rarity:'legendary', price:780, icon:'🌪️', name:'🌪️ การ์ดบาโฟเมตวายุ (เคลือบธาตุลม)', desc:'เปลี่ยนการโจมตีเป็นธาตุลม 🌪️ + ASPD +10, CRIT +12% (ชนะน้ำ/พืช ×1.25–1.5!)', attackElement:'wind',
+      effects:[{ stat:'aspd', mode:'flat', value:10 }, { stat:'physCrit', mode:'flat', value:12 }] },
+    { id:'card_hatii',        slot:'card', rarity:'epic',      price:520, icon:'❄️', name:'❄️ การ์ดราชันย์หมาป่าน้ำแข็ง (เคลือบน้ำแข็ง)', desc:'เปลี่ยนการโจมตีเป็นธาตุน้ำแข็ง ❄️ + ATK +10%, CRIT +8% (ชนะพืช/ลม/ดิน ×1.25–1.75!)', attackElement:'ice',
+      effects:[{ stat:'atk', mode:'percent', value:0.10 }, { stat:'physCrit', mode:'flat', value:8 }] },
+    { id:'card_griffon',      slot:'card', rarity:'epic',      price:540, icon:'⚡', name:'⚡ การ์ดกริฟฟอนอัสนี (เคลือบสายฟ้า)', desc:'เปลี่ยนการโจมตีเป็นธาตุสายฟ้า ⚡ + ASPD +8, ATK +10% (ชนะน้ำ/น้ำแข็ง ×1.5–1.75!)', attackElement:'lightning',
+      effects:[{ stat:'aspd', mode:'flat', value:8 }, { stat:'atk', mode:'percent', value:0.10 }] },
+    { id:'card_dryad',        slot:'card', rarity:'rare',      price:360, icon:'🌿', name:'🌿 การ์ดภูตพฤกษา (เคลือบธาตุพืช)', desc:'เปลี่ยนการโจมตีเป็นธาตุพืช 🌿 + MATK +10%, ฟื้น HP +5/วิ (ชนะน้ำ/ดิน ×1.75!)', attackElement:'nature',
+      effects:[{ stat:'matk', mode:'percent', value:0.10 }, { stat:'hpRegen', mode:'flat', value:5 }] },
+    { id:'card_snake',        slot:'card', rarity:'rare',      price:350, icon:'☠️', name:'☠️ การ์ดอสรพิษดำ (เคลือบธาตุพิษ)', desc:'เปลี่ยนการโจมตีเป็นธาตุพิษ ☠️ + ATK +9%, FLEE +12 (ชนะพืช ×1.75, ไฟ/น้ำ/ลม ×1.25!)', attackElement:'poison',
+      effects:[{ stat:'atk', mode:'percent', value:0.09 }, { stat:'flee', mode:'flat', value:12 }] },
+    { id:'card_angeling',     slot:'card', rarity:'legendary', price:820, icon:'✨', name:'✨ การ์ดแองเจลลิ่ง (เคลือบศักดิ์สิทธิ์)', desc:'เปลี่ยนการโจมตีเป็นธาตุศักดิ์สิทธิ์ ✨ + ATK +10%, MATK +10% (ชนะผีดิบ ×2.0, ความมืด ×1.75!)', attackElement:'holy',
+      effects:[{ stat:'atk', mode:'percent', value:0.10 }, { stat:'matk', mode:'percent', value:0.10 }] },
+    { id:'card_bathory',      slot:'card', rarity:'epic',      price:500, icon:'🌑', name:'🌑 การ์ดแม่มดเงามืด (เคลือบความมืด)', desc:'เปลี่ยนการโจมตีเป็นธาตุความมืด 🌑 + CRIT +10%, ATK +8% (ชนะศักดิ์สิทธิ์ ×1.75, วิญญาณ ×1.5!)', attackElement:'shadow',
+      effects:[{ stat:'physCrit', mode:'flat', value:10 }, { stat:'atk', mode:'percent', value:0.08 }] },
+    { id:'card_whisper',      slot:'card', rarity:'epic',      price:560, icon:'👻', name:'👻 การ์ดวิญญาณกระซิบ (เคลือบธาตุวิญญาณ)', desc:'เปลี่ยนการโจมตีเป็นธาตุวิญญาณ 👻 + MATK +12%, ATK +10% (ตีมอนสเตอร์ธาตุวิญญาณเข้า ×1.75!)', attackElement:'ghost',
+      effects:[{ stat:'matk', mode:'percent', value:0.12 }, { stat:'atk', mode:'percent', value:0.10 }] },
+
+    /* --- 7. ไอเทมกดใช้ในกระเป๋า (Consumables — แท็บ ITEM) --- */
+    { id:'pot_red',           slot:'consumable', rarity:'common', price:35,  weight:7,  icon:'🧪', name:'🧪 เรดโพชั่นเข้มข้น (HP +40%)', desc:'กดใช้ในกระเป๋าเพื่อฟื้นฟู HP 40% ของเลือดสูงสุดทันที',
+      consumeEffect:{ hpPct:0.40, spPct:0 } },
+    { id:'pot_blue',          slot:'consumable', rarity:'common', price:50,  weight:10, icon:'💙', name:'💙 บลูโพชั่นมานา (SP +45%)',   desc:'กดใช้ในกระเป๋าเพื่อฟื้นฟู SP 45% ของมานาสูงสุดทันที',
+      consumeEffect:{ hpPct:0, spPct:0.45 } },
+    { id:'pot_aspd',          slot:'consumable', rarity:'rare',   price:110, weight:15, icon:'⚡', name:'⚡ ยาเร่งความเร็วเบอร์เซิร์ก', desc:'กดใช้เพื่อฟื้นฟู HP/SP 50% และเร่งจังหวะต่อสู้ทันที',
+      consumeEffect:{ hpPct:0.50, spPct:0.50 } },
+
+    /* --- 8. วัตถุดิบดรอป & แร่ตีบวก (Monster Loot & Materials — แท็บ ETC) --- */
+    { id:'etc_jellopy',       slot:'etc', rarity:'common',    price:30,  weight:3,  icon:'💧', name:'💧 เจลโลปี้ (Jellopy)',           desc:'เมือกคริสตัลใสจากปอริ่ง เก็บสะสมไว้ในคลังคาฟราหรือขายให้ NPC ได้' },
+    { id:'etc_fang',          slot:'etc', rarity:'common',    price:70,  weight:5,  icon:'🦷', name:'🦷 เขี้ยวหมาป่าเงา (Wolf Fang)',   desc:'เขี้ยวแหลมคมจากหมาป่าเขี้ยวเงา วัตถุดิบทำอาวุธและขายได้ราคาดี' },
+    { id:'etc_ice_heart',     slot:'etc', rarity:'rare',      price:150, weight:8,  icon:'🧊', name:'🧊 หัวใจน้ำแข็งนิรันดร์ (Ice Heart)', desc:'ผลึกน้ำแข็งที่ไม่ละลายจากถ้ำเหมันต์ มูลค่าสูงในตลาดนักผจญภัย' },
+    { id:'etc_ectoplasm',     slot:'etc', rarity:'rare',      price:180, weight:4,  icon:'🔮', name:'🔮 ผงวิญญาณเรืองแสง (Ectoplasm)', desc:'ละอองเวทมนตร์จากภูตวิญญาณเร่ร่อน ใช้หลอมเครื่องประดับอาร์เคน' },
+    { id:'etc_oridecon',      slot:'etc', rarity:'epic',      price:320, weight:20, icon:'⛏️', name:'⛏️ แร่โอริเดคอนบริสุทธิ์ (Oridecon)', desc:'แร่โลหะศักดิ์สิทธิ์ระดับสูงของ RO ใช้ตีบวกอาวุธหรือเก็บสะสมในคลังคาฟรา' },
+    { id:'etc_dragon_scale',  slot:'etc', rarity:'legendary', price:600, weight:25, icon:'🐲', name:'🐲 เกล็ดราชันย์มังกรเพลิง',        desc:'เกล็ดเพลิงระดับตำนานที่ดรอปจากบอสมังกร ขายคืนร้านค้าได้ราคาสูงมาก!' }
+  ];
+
+  // สูตรคำนวณสเตตัสแบบ RO (Status Lab Backend Config) — ปรับแต่งได้จากแท็บ "สเตตัส & สูตรคำนวณ"
+  const formulaConfig = {
+    statusPointSystem: { startPoints:48, levelUpOffset:9, levelUpDivisor:4, statCap:99 },
+    baseConstants: {
+      hpPerVit:12, hpPerLevel:20, spPerInt:8, spPerLevel:8, matkPerInt:2.5,
+      hitBase:50, hitPerDex:1, fleeBase:50, fleePerAgi:0.8, fleePerLuk:0.3,
+      aspdBase:100, aspdPerAgi:0.4, aspdPerDex:0.1, critBase:1, critPerLuk:0.3,
+      defPerVit:0.5, mdefPerInt:0.5, hpRegenPerVit:0.05, spRegenBase:1.0, spRegenPerInt:0.05,
+      moveSpeedBase:195, rollCooldown:1.1, rollDistance:135, rollDuration:0.28,
+    },
+    statCurve: {
+      str:{ breakpoints:[50,100], slopes:[1,0.7,0.4] },
+      agi:{ breakpoints:[50,100], slopes:[1,0.65,0.35] },
+      vit:{ breakpoints:[50,100], slopes:[1,0.75,0.45] },
+      int:{ breakpoints:[50,100], slopes:[1,0.7,0.4] },
+      dex:{ breakpoints:[50,100], slopes:[1,0.7,0.4] },
+      luk:{ breakpoints:[50,100], slopes:[1,0.8,0.5] },
+    },
+    classCoefs: {
+      novice:   { hpCoef:1.0, spCoef:1.0 },
+      swordman: { hpCoef:1.4, spCoef:0.6 },
+      thief:    { hpCoef:1.1, spCoef:0.9 },
+      archer:   { hpCoef:1.0, spCoef:1.0 },
+      mage:     { hpCoef:0.6, spCoef:1.4 },
+    },
+    weaponProfiles: {
+      unarmed:  { stat:'str', coeff:0.5, stat2:'',    coeff2:0,   aspdOffset:0,   range:66,  critBonusFlat:0, hitBonusFlat:0,  hitPenalty:0,  defPen:0,    matkPercent:0 },
+      sword_1h: { stat:'str', coeff:1.0, stat2:'',    coeff2:0,   aspdOffset:0,   range:80,  critBonusFlat:0, hitBonusFlat:0,  hitPenalty:0,  defPen:0,    matkPercent:0 },
+      sword_2h: { stat:'str', coeff:1.4, stat2:'',    coeff2:0,   aspdOffset:-15, range:96,  critBonusFlat:0, hitBonusFlat:0,  hitPenalty:0,  defPen:0,    matkPercent:0 },
+      axe:      { stat:'str', coeff:1.1, stat2:'',    coeff2:0,   aspdOffset:-8,  range:80,  critBonusFlat:0, hitBonusFlat:0,  hitPenalty:10, defPen:0.15, matkPercent:0 },
+      mace:     { stat:'str', coeff:0.8, stat2:'vit', coeff2:0.3, aspdOffset:0,   range:76,  critBonusFlat:0, hitBonusFlat:0,  hitPenalty:0,  defPen:0,    matkPercent:0 },
+      dagger:   { stat:'agi', coeff:0.7, stat2:'luk', coeff2:0.3, aspdOffset:20,  range:70,  critBonusFlat:5, hitBonusFlat:0,  hitPenalty:0,  defPen:0,    matkPercent:0 },
+      bow:      { stat:'dex', coeff:1.0, stat2:'',    coeff2:0,   aspdOffset:5,   range:255, critBonusFlat:0, hitBonusFlat:15, hitPenalty:0,  defPen:0,    matkPercent:0 },
+      staff:    { stat:'str', coeff:0.1, stat2:'',    coeff2:0,   aspdOffset:0,   range:235, critBonusFlat:0, hitBonusFlat:0,  hitPenalty:0,  defPen:0,    matkPercent:0.2 },
+    },
+    shieldProfile: { aspdOffset:-5, blockChance:0.15, defFlat:15 },
+    magicCrit: { chanceBase:0, lukScalar:0.45, mdefIgnoreBase:0.5, dexScalar:0.002, mdefIgnoreCap:0.7, critDmgBase:0.1, intScalar:0.0008, critDmgCap:0.25 },
+  };
+
+  // สล็อตโมเดลตัวละครและมอนสเตอร์ (รองรับ Chibi Rig เริ่มต้น + เตรียมพร้อมใส่ไฟล์ .glb/.gltf หรือ Sprite Sheet)
+  const modelSlots = {
+    classes: {
+      novice:   { name:'ชาวบ้าน (Cat Novice)',   earStyle:'cat', bodyColor:'#f4c98e', tunicColor:'#6c9c6b', capeColor:'#d9a44c', hatType:'bandana', scale:1.0, modelUrl:'', spriteUrl:'', animMap:{ idle:'Idle', walk:'Walk', attack:'Attack', cast:'Cast', roll:'Roll', hurt:'Hit', dead:'Death' } },
+      swordman: { name:'นักดาบ (Knight Cat)',    earStyle:'cat', bodyColor:'#f4c98e', tunicColor:'#3c689c', capeColor:'#c9493b', hatType:'helm',    scale:1.05, modelUrl:'', spriteUrl:'', animMap:{ idle:'Idle', walk:'Walk', attack:'Slash', cast:'Roar', roll:'Roll', hurt:'Hit', dead:'Death' } },
+      thief:    { name:'โจร (Shadow Paw)',       earStyle:'fox', bodyColor:'#e8b882', tunicColor:'#3a344d', capeColor:'#7c52a5', hatType:'hood',    scale:0.98, modelUrl:'', spriteUrl:'', animMap:{ idle:'Idle', walk:'Run', attack:'Stab', cast:'Throw', roll:'Dash', hurt:'Hit', dead:'Death' } },
+      archer:   { name:'นักธนู (Ranger Tail)',   earStyle:'cat', bodyColor:'#f4c98e', tunicColor:'#3d7a5a', capeColor:'#8cb858', hatType:'feather', scale:1.0, modelUrl:'', spriteUrl:'', animMap:{ idle:'Idle', walk:'Walk', attack:'Shoot', cast:'Trap', roll:'Roll', hurt:'Hit', dead:'Death' } },
+      mage:     { name:'จอมเวท (Arcane Purr)',   earStyle:'cat', bodyColor:'#f7d8b5', tunicColor:'#58427c', capeColor:'#4ea8de', hatType:'wizard',  scale:0.98, modelUrl:'', spriteUrl:'', animMap:{ idle:'Idle', walk:'Float', attack:'Wand', cast:'Spell', roll:'Blink', hurt:'Hit', dead:'Death' } },
+    },
+    monsters: {
+      dummy:  { name:'ดัมมี่ฝึกซ้อม', bodyType:'dummy',  color:'#c99c67', accent:'#8c6239', scale:1.0,  modelUrl:'', spriteUrl:'' },
+      poring: { name:'สไลม์ปอริ่ง',   bodyType:'slime',  color:'#f27ca4', accent:'#ffd6e5', scale:0.92, modelUrl:'', spriteUrl:'' },
+      wolf:   { name:'หมาป่าเขี้ยวเงา', bodyType:'wolf',   color:'#6e7b91', accent:'#d9534f', scale:1.05, modelUrl:'', spriteUrl:'' },
+      armor:  { name:'หุ่นเกราะหนา',  bodyType:'golem',  color:'#6f8596', accent:'#f0b44c', scale:1.25, modelUrl:'', spriteUrl:'' },
+      boss:   { name:'บอสมังกรเพลิง', bodyType:'dragon', color:'#d94e41', accent:'#f7b538', scale:1.55, modelUrl:'', spriteUrl:'' },
+    }
+  };
+
+  const globals = {
+    aspdCap:193, softDefK:300, maxPhysReduction:0.8, maxMagicReduction:0.8, maxDodge:0.6,
+    critMult:1.5, blockReduction:0.3, hitBase:0.5, hitPerPoint:0.01,
+    respawnDelay:1.2, reviveDelay:2.0,
+    buffPercentCap:{ atk:0.6, matk:0.6 },   // เพดานผลรวม % ที่มาจาก buff ชั่วคราว ต่อสเตตัส (passive ไม่ถูกจำกัด)
+  };
+
+  // บิลด์ตัวอย่าง = ชุดการลงแต้มสำเร็จรูป (ตรวจ prerequisite และงบแต้มแล้ว: Novice 9 แต้ม, คลาสแรก 49 แต้ม)
+  const brawlerNv = { nvScrapper:3, nvHardy:3, nvStrongArms:1, nvWits:2 };
+  const swiftNv   = { nvWits:3, nvScrapper:3, nvLightSteps:1, nvHardy:2 };
+  const sharpNv   = { nvWits:3, nvHardy:3, nvRest:2, nvSharpEyes:1 };
+  const mysticNv  = { nvRest:3, nvHardy:3, nvFirstAid:2, nvCalmMind:1 };
+  const builds = [
+    { id:'bld_striker', name:'นักดาบสองมือ (Striker)', classId:'swordman', jobLv:50, presetId:'sw50_2h',
+      learned: Object.assign({}, brawlerNv, { swMastery:5, swTwoHand:5, swOpening:5, swBash:10, swProvoke:3, swMagnum:5, swBattleCry:5, swSoul:3, swBerserk:5, swLastStand:3 }) },
+    { id:'bld_guardian', name:'ดาบ+โล่ (Guardian)', classId:'swordman', jobLv:50, presetId:'sw50_shield',
+      learned:{ nvHardy:3, nvRest:3, nvFirstAid:3, swToughness:5, swRecovery:5, swShieldDisc:5, swEndure:5, swBash:9, swShieldBash:5, swProvoke:5, swMastery:5, swBattleCry:5 } },
+    { id:'bld_berserker', name:'บ้าคลั่ง (Berserker)', classId:'swordman', jobLv:50, presetId:'sw50_1h',
+      learned: Object.assign({}, brawlerNv, { swMastery:5, swOpening:5, swBash:8, swProvoke:3, swBerserk:5, swLastStand:5, swSoul:3, swToughness:5, swRecovery:5, swEndure:5 }) },
+    { id:'bld_th_assassin', name:'โจรสายกริชลอบสังหาร (Assassin)', classId:'thief', jobLv:50, presetId:'th50_dagger',
+      learned: Object.assign({}, swiftNv, { thMastery:5, thDouble:5, thWeakSpot:5, thShadowStrike:3, thQuickStrike:10, thBackstab:5, thAgility:3, thEvasion:3, thShadowDance:5, thEnvenom:5 }) },
+    { id:'bld_th_venom', name:'โจรสายพิษ & เงา (Venom Phantom)', classId:'thief', jobLv:50, presetId:'th50_dagger',
+      learned: Object.assign({}, swiftNv, { thMastery:5, thQuickStrike:6, thEnvenom:5, thVenomLore:5, thVenomCoat:5, thAgility:5, thEvasion:5, thSandAttack:3, thSmoke:5, thCheatDeath:5 }) },
+    { id:'bld_ar_sharpshooter', name:'นักธนูสายยิงเร็ว & คริ (Sharpshooter)', classId:'archer', jobLv:50, presetId:'ar50_bow',
+      learned: Object.assign({}, sharpNv, { arBowMastery:5, arRapidFire:5, arHunterInstinct:3, arDoubleStrafe:10, arOwlEye:5, arVultureEye:5, arVitalShot:5, arPiercingShot:5, arConcentrate:5, arSniperStance:1 }) },
+    { id:'bld_ar_ranger', name:'นักธนูสายพราน & ห่าฝนธนู (Ranger)', classId:'archer', jobLv:50, presetId:'ar50_bow',
+      learned: Object.assign({}, sharpNv, { arBowMastery:5, arRapidFire:5, arDoubleStrafe:9, arArrowShower:5, arAnkleSnare:5, arRangerStep:5, arWindWalk:5, arEvasiveRoll:5, arOwlEye:5 }) },
+    { id:'bld_mg_elementalist', name:'จอมเวทสายธาตุทำลายล้าง (Elementalist)', classId:'mage', jobLv:50, presetId:'mg50_staff',
+      learned: Object.assign({}, mysticNv, { mgSpellMastery:5, mgElemMastery:5, mgFireBolt:10, mgFrostNova:5, mgThunderStorm:5, mgManaTraining:5, mgEnergyCoat:5, mgArcaneFocus:4, mgAmplify:5 }) },
+    { id:'bld_mg_arcanist', name:'จอมเวทสายคริอาร์เคน (Arcanist)', classId:'mage', jobLv:50, presetId:'mg50_staff',
+      learned: Object.assign({}, mysticNv, { mgSpellMastery:3, mgElemMastery:2, mgFireBolt:6, mgArcaneFocus:5, mgInsight:5, mgArchmageWisdom:3, mgSoulStrike:5, mgAmplify:5, mgOvercharge:5, mgManaTraining:5, mgEnergyCoat:5 }) },
+    { id:'bld_nv_survivor', name:'ชาวบ้านสายทน', classId:'novice', jobLv:10, presetId:'novice10',
+      learned:{ nvHardy:3, nvRest:3, nvFirstAid:3 } },
+    { id:'bld_nv_skirmisher', name:'ชาวบ้านสายปาหิน', classId:'novice', jobLv:10, presetId:'novice10',
+      learned:{ nvWits:3, nvStone:3, nvSharpEyes:1, nvLightSteps:1, nvRest:1 } },
+  ];
+
+  // ข้อมูลแผนที่โลก 2.5D แบบ Multi-Map & Portal Graph (Single Source of Truth สำหรับทุกหน้า)
+  const defaultPronteraZones = [
+    { id:'town',   name:'🏰 เมืองพาวทาวน์ (Paw Town)',       sub:'เขตปลอดภัย · น้ำพุฟื้นฟู HP/SP', x:420,  y:850,  r:230, color:'#68d391' },
+    { id:'train',  name:'🎯 ลานฝึกซ้อมอัศวิน',               sub:'ดัมมี่ไร้ธาตุ & โกเลมซ้อมคอมโบ',  x:880,  y:850,  r:240, color:'#ecc94b' },
+    { id:'meadow', name:'🌿 ทุ่งปอริ่ง & พฤกษา',            sub:'Lv.1–25 · มอนสเตอร์ธาตุน้ำ💧 & พืช🌿', x:980,  y:380,  r:290, color:'#f687b3' },
+    { id:'woods',  name:'🌲 ป่าหมาป่าเขี้ยวเงา',              sub:'Lv.25–45 · มอนสเตอร์ธาตุดิน🪨 & พืช🌿', x:1520, y:1250, r:310, color:'#90cdf4' },
+    { id:'shrine', name:'🌋 แท่นบูชามังกรเพลิง (Boss Arena)', sub:'Lv.50+ · ธาตุไฟ🔥 & สายฟ้า⚡',   x:1920, y:620,  r:330, color:'#fc8181' },
+  ];
+  const defaultPronteraSpawns = [
+    { id:'sp_1',  monsterId:'dummy',         x:820,  y:790 },
+    { id:'sp_2',  monsterId:'dummy',         x:820,  y:920 },
+    { id:'sp_3',  monsterId:'armor',         x:960,  y:855 },
+    { id:'sp_4',  monsterId:'poring',        x:860,  y:340 },
+    { id:'sp_5',  monsterId:'poring',        x:1020, y:310 },
+    { id:'sp_6',  monsterId:'treant',        x:1110, y:430 },
+    { id:'sp_7',  monsterId:'poring',        x:940,  y:470 },
+    { id:'sp_8',  monsterId:'wolf',          x:1420, y:1180 },
+    { id:'sp_9',  monsterId:'treant',        x:1610, y:1220 },
+    { id:'sp_10', monsterId:'wolf',          x:1510, y:1360 },
+    { id:'sp_11', monsterId:'thunder_golem', x:1740, y:740 },
+    { id:'sp_12', monsterId:'boss',          x:1960, y:580 },
+  ];
+  const defaultPronteraPortals = [
+    { id:'pt_to_cave',    name:'🌀 วาร์ปไป: ถ้ำคริสตัลเหมันต์', x:1680, y:1380, toMapId:'map_crystal_cave', toX:360, yOut:850, toY:850, color:'#63b3ed' },
+    { id:'pt_to_volcano', name:'🌀 วาร์ปไป: รังมังกรบรรพกาล',   x:2180, y:620,  toMapId:'map_dragon_keep',  toX:360, yOut:850, toY:850, color:'#fc8181' }
+  ];
+
+  const worldMap = {
+    currentMapId: 'map_prontera',
+    zones: defaultPronteraZones,
+    spawns: defaultPronteraSpawns,
+    portals: defaultPronteraPortals,
+    maps: [
+      {
+        id: 'map_prontera',
+        name: '🗺️ แมพ 1: อาณาจักรพาวทาวน์ & ทุ่งปอริ่ง (Paw Kingdom)',
+        bgColor: '#2d4a3e',
+        roadColor: '#6b5b45',
+        zones: defaultPronteraZones,
+        spawns: defaultPronteraSpawns,
+        portals: defaultPronteraPortals
+      },
+      {
+        id: 'map_crystal_cave',
+        name: '❄️ แมพ 2: ถ้ำคริสตัลเหมันต์ & สุสานวิญญาณ (Lv.30–50)',
+        bgColor: '#1e2d3d',
+        roadColor: '#3b526b',
+        zones: [
+          { id:'cave_ent',   name:'🏕️ ค่ายนักสำรวจปากถ้ำ',            sub:'เขตปลอดภัย · น้ำพุฟื้นฟู', x:420,  y:850,  r:210, color:'#68d391' },
+          { id:'ice_hall',   name:'❄️ โถงหมาป่าเหมันต์ & สไลม์น้ำ',    sub:'Lv.30–42 · ธาตุน้ำแข็ง❄️ & น้ำ💧', x:1020, y:560,  r:300, color:'#63b3ed' },
+          { id:'dark_sanct', name:'👻 วิหารวิญญาณ & อัศวินผีดิบ',      sub:'Lv.45+ · ธาตุวิญญาณ👻 & ผีดิบ💀', x:1660, y:1020, r:320, color:'#b794f4' }
+        ],
+        spawns: [
+          { id:'cv_1', monsterId:'poring',   x:940,  y:520 },
+          { id:'cv_2', monsterId:'ice_wolf', x:1080, y:590 },
+          { id:'cv_3', monsterId:'ice_wolf', x:1010, y:460 },
+          { id:'cv_4', monsterId:'wraith',   x:1520, y:920 },
+          { id:'cv_5', monsterId:'wraith',   x:1640, y:980 },
+          { id:'cv_6', monsterId:'skeleton', x:1720, y:1080 },
+          { id:'cv_7', monsterId:'skeleton', x:1580, y:1140 }
+        ],
+        portals: [
+          { id:'pt_cave_back', name:'🌀 กลับ: เมืองพาวทาวน์', x:260, y:850, toMapId:'map_prontera', toX:520, toY:850, color:'#68d391' },
+          { id:'pt_cave_boss', name:'🌀 วาร์ปไป: รังมังกรบรรพกาล', x:1980, y:1020, toMapId:'map_dragon_keep', toX:360, toY:850, color:'#fc8181' }
+        ]
+      },
+      {
+        id: 'map_dragon_keep',
+        name: '🌋 แมพ 3: รังมังกรเพลิง & ป้อมสายฟ้า (Lv.50+)',
+        bgColor: '#361f24',
+        roadColor: '#5c2b29',
+        zones: [
+          { id:'keep_gate', name:'🛡️ ป้อมปราการผู้กล้า',        sub:'เขตปลอดภัย · เตรียมตัวก่อนลุยบอส', x:420,  y:850, r:210, color:'#68d391' },
+          { id:'lava_path', name:'⚡ ทางเดินโกเลมสายฟ้า & ความมืด', sub:'Lv.50+ · ธาตุสายฟ้า⚡ & ความมืด🌑', x:1100, y:850, r:290, color:'#f6ad55' },
+          { id:'throne',    name:'🐲 บัลลังก์จ้าวมังกรเพลิง',    sub:'Boss Raid · ธาตุไฟ🔥 ดรอปของระดับตำนาน!', x:1850, y:780, r:360, color:'#fc8181' }
+        ],
+        spawns: [
+          { id:'dk_1', monsterId:'skeleton',      x:1020, y:790 },
+          { id:'dk_2', monsterId:'armor',         x:1150, y:890 },
+          { id:'dk_3', monsterId:'thunder_golem', x:1240, y:780 },
+          { id:'dk_4', monsterId:'boss',          x:1780, y:720 },
+          { id:'dk_5', monsterId:'boss',          x:1940, y:860 }
+        ],
+        portals: [
+          { id:'pt_keep_back', name:'🌀 กลับ: เมืองพาวทาวน์', x:260, y:850, toMapId:'map_prontera', toX:520, toY:850, color:'#68d391' }
+        ]
+      }
+    ]
+  };
+
+  SL.DEFAULT_DATA = { version:3, classes, branches, skills, weapons, statDefs, presets, monsters, builds, globals, formulaConfig, modelSlots, worldMap, elementSystem, equipItems };
+})(typeof window !== 'undefined' ? window : globalThis);

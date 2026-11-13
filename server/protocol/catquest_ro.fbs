@@ -1,0 +1,132 @@
+// ============================================================
+// Cat Quest × RO Action-MMORPG — FlatBuffers Schema (Zero-Copy Binary Wire)
+// คอมไพล์สำหรับ Go:
+//   flatc --go -o ../sim-go/generated catquest_ro.fbs
+//   flatc --go   -o ../gateway-go/protocol    catquest_ro.fbs
+// ============================================================
+namespace CatQuestRO.Protocol;
+
+enum OpCode : ubyte {
+  Ping          = 1,
+  Pong          = 2,
+  Auth          = 3,
+  Move          = 16,
+  Attack        = 17,
+  Skill         = 18,
+  Roll          = 19,
+  WorldSnapshot = 32,
+  DamageEvent   = 33,
+  Telegraph     = 34,
+  Chat          = 48
+}
+
+enum AnimState : ubyte {
+  Idle   = 0,
+  Walk   = 1,
+  Attack = 2,
+  Cast   = 3,
+  Roll   = 4,
+  Hurt   = 5,
+  Dead   = 6
+}
+
+enum TelegraphShape : ubyte {
+  Circle = 0,
+  Cone   = 1,
+  Line   = 2
+}
+
+// โครงสร้าง Struct ขนาดคงที่ (Zero-Allocation Inline Memory) สำหรับ Snapshot 30–60 Hz
+struct PeerState {
+  uid:       uint32;
+  x:         uint16;
+  y:         uint16;
+  hp:        uint16;
+  max_hp:    uint16;
+  class_id:  ubyte;
+  weapon_id: ubyte;
+  facing:    byte;
+  anim:      AnimState;
+}
+
+struct MobState {
+  uid:     uint32;
+  x:       uint16;
+  y:       uint16;
+  hp:      uint32;
+  alive:   ubyte;
+  facing:  byte;
+  anim:    AnimState;
+  casting: ubyte;
+}
+
+table MoveCmd {
+  seq:    uint32;
+  x:      float32;
+  y:      float32;
+  vx:     int16;
+  vy:     int16;
+  facing: byte;
+  anim:   AnimState;
+}
+
+table AttackCmd {
+  seq:        uint32;
+  target_uid: uint32;
+  x:          uint16;
+  y:          uint16;
+}
+
+table SkillCmd {
+  seq:        uint32;
+  skill_idx:  uint16;
+  lv:         ubyte;
+  target_uid: uint32;
+  x:          uint16;
+  y:          uint16;
+}
+
+table DamageEvent {
+  attacker_uid: uint32;
+  target_uid:   uint32;
+  dmg:          uint32;
+  hp_left:      uint32;
+  flags:        ubyte; // bit0=crit, bit1=miss, bit2=magic, bit3=kill
+}
+
+table TelegraphEvent {
+  mob_uid:   uint32;
+  shape:     TelegraphShape;
+  x:         uint16;
+  y:         uint16;
+  radius:    uint16;
+  angle_deg: int16;
+  cast_ms:   uint16;
+  mult_pct:  uint16;
+}
+
+table ChatMsg {
+  channel: ubyte;
+  sender:  string;
+  text:    string;
+}
+
+table WorldSnapshot {
+  server_tick: uint32;
+  peers:       [PeerState];
+  mobs:        [MobState];
+}
+
+table PacketEnvelope {
+  op:       OpCode;
+  move:     MoveCmd;
+  attack:   AttackCmd;
+  skill:    SkillCmd;
+  damage:   DamageEvent;
+  telegraph:TelegraphEvent;
+  chat:     ChatMsg;
+  snapshot: WorldSnapshot;
+}
+
+root_type PacketEnvelope;
+file_identifier "CQRO";

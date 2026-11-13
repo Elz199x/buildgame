@@ -1,0 +1,16 @@
+{
+  "name": "ro-skill-lab",
+  "version": "1.0.0",
+  "private": true,
+  "description": "RO Skill Lab — ตัวจำลองสกิลแนว Ragnarok Online แยกจาก Status Lab (ข้อมูลล้วน + ตัวแก้ไข + ตัวจำลองต่อสู้)",
+  "scripts": {
+    "build": "node tools/build.js",
+    "test": "node tests/test-core.js",
+    "test:ui": "node tests/ui-smoke.js && node tests/ui-flow.js",
+    "docs": "node tools/gen-skill-tables.js && node tools/bench-report.js",
+    "all": "npm run build && npm test && npm run test:ui && npm run docs"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  }
+}

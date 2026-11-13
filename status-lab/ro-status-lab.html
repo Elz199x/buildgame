@@ -1,0 +1,1761 @@
+<!-- RO Status Lab — จำลองการคำนวณสเตตัส + หน้า backend ปรับสูตรแยกหมวดหมู่ -->
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>RO Status Lab</title>
+<style>
+  /* ------------------------------------------------------------------
+     DESIGN PLAN
+     Layout: แท็บ "ห้องทดลอง" (ตัวสร้างตัวละคร + ดัมมี่เรียลไทม์)
+             แท็บ "ตั้งค่าสูตร" (backend) = การ์ดแยกหมวดหมู่ แก้/เพิ่ม/ลบ/รีเซ็ตได้
+             ทั้งสองแท็บอ่าน/เขียน CONFIG ก้อนเดียวกัน บันทึกลง localStorage
+  ------------------------------------------------------------------- */
+  :root{
+    --bg:#12161d;
+    --surface:#1a2029;
+    --surface-2:#222a36;
+    --border:#2b3341;
+    --fg:#e7eaf0;
+    --fg-dim:#8d96a8;
+    --accent:#d1a44c;
+    --accent-ink:#241c0c;
+    --accent-2:#4f9d92;
+    --danger:#d9695c;
+    --success:#6aab74;
+    --font-display:'Chakra Petch', 'Noto Sans Thai', sans-serif;
+    --font-body:'IBM Plex Sans Thai', 'Noto Sans Thai', sans-serif;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light){
+    :root:not([data-theme="dark"]){
+      --bg:#eef0f4; --surface:#ffffff; --surface-2:#f4f5f9; --border:#d7dbe3;
+      --fg:#1b222c; --fg-dim:#636d80; --accent:#a97e2e; --accent-ink:#fff7e6;
+      --accent-2:#2f786d; --danger:#b93f31; --success:#2f7a3d;
+      color-scheme: light;
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#eef0f4; --surface:#ffffff; --surface-2:#f4f5f9; --border:#d7dbe3;
+    --fg:#1b222c; --fg-dim:#636d80; --accent:#a97e2e; --accent-ink:#fff7e6;
+    --accent-2:#2f786d; --danger:#b93f31; --success:#2f7a3d;
+    color-scheme: light;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font-family:var(--font-body); font-size:14px; line-height:1.55;
+    padding-left:max(16px, env(safe-area-inset-left,0px));
+    padding-right:max(16px, env(safe-area-inset-right,0px));
+    padding-block:20px 40px;
+  }
+  h1,h2,h3{font-family:var(--font-display); text-wrap:balance; margin:0;}
+  .mono, .num{font-family:var(--font-display); font-variant-numeric:tabular-nums;}
+  a{color:var(--accent);}
+
+  .shell{max-width:1180px; margin:0 auto; display:flex; flex-direction:column; gap:18px;}
+
+  header.top{display:flex; flex-direction:column; gap:4px; padding-bottom:6px;}
+  header.top .eyebrow{font-family:var(--font-display); letter-spacing:.14em; text-transform:uppercase; font-size:11px; color:var(--accent);}
+  header.top h1{font-size:28px; font-weight:600;}
+  header.top p{color:var(--fg-dim); margin:4px 0 0; max-width:62ch; font-size:13px;}
+
+  .tabs{display:flex; gap:4px; border-bottom:1px solid var(--border);}
+  .tab-link{
+    font-family:var(--font-display); font-size:12.5px; font-weight:600;
+    padding:9px 16px; border-radius:8px 8px 0 0; color:var(--fg-dim);
+    text-decoration:none; border:1px solid transparent; margin-bottom:-1px;
+  }
+  .tab-link.active{color:var(--accent); background:var(--surface); border-color:var(--border); border-bottom-color:var(--surface);}
+
+  .layout{display:grid; grid-template-columns: 340px minmax(0,1fr); gap:18px; align-items:start;}
+  @media (max-width:860px){ .layout{grid-template-columns:1fr;} }
+
+  .panel{
+    background:var(--surface); border:1px solid var(--border); border-radius:10px;
+    padding:16px; display:flex; flex-direction:column; gap:14px; min-width:0;
+  }
+  .panel > h2{
+    font-size:13px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--accent); font-weight:600; display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  }
+  .panel > h2 .tag{font-family:var(--font-body); text-transform:none; letter-spacing:0; color:var(--fg-dim); font-size:11px; font-weight:400;}
+  .catreset{margin-left:auto; padding:5px 10px; font-size:10.5px;}
+
+  label.field{display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--fg-dim); min-width:0;}
+  label.field b{color:var(--fg); font-size:12.5px; font-weight:600;}
+  select, input[type=number], input[type=text], textarea{
+    background:var(--surface-2); border:1px solid var(--border); color:var(--fg);
+    border-radius:6px; padding:7px 8px; font-family:var(--font-body); font-size:13px; width:100%;
+  }
+  textarea{font-family:var(--font-display); font-size:11.5px; resize:vertical;}
+  input[type=range]{width:100%; accent-color:var(--accent);}
+
+  .points-bar{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:10px 12px;
+  }
+  .points-bar .label{font-size:11px; color:var(--fg-dim); text-transform:uppercase; letter-spacing:.06em;}
+  .points-bar .value{font-family:var(--font-display); font-size:20px;}
+  .points-bar .value.deficit{color:var(--danger);}
+  .points-bar button{padding:7px 10px; font-size:11.5px;}
+
+  .stat-grid{display:flex; flex-direction:column; gap:8px;}
+  .stat-row{
+    display:grid; grid-template-columns:34px 1fr auto auto auto; align-items:center; gap:8px;
+    background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:7px 9px; min-width:0;
+  }
+  .stat-row .name{font-size:12px; color:var(--fg-dim); font-weight:600;}
+  .stat-row .valwrap{display:flex; flex-direction:column; min-width:0;}
+  .stat-row .raw{font-family:var(--font-display); font-size:16px; line-height:1;}
+  .stat-row .eff{font-size:10.5px; color:var(--accent-2); white-space:nowrap;}
+  .stat-row .cost{font-size:10px; color:var(--fg-dim); white-space:nowrap; text-align:right; width:56px;}
+  .statbtn{width:26px; height:26px; padding:0; border-radius:6px; font-size:15px; line-height:1; display:flex; align-items:center; justify-content:center;}
+  .statbtn:disabled{opacity:.35; cursor:not-allowed;}
+
+  .passive{
+    border:1px solid var(--border); border-radius:8px; background:var(--surface-2);
+    padding:10px; display:flex; flex-direction:column; gap:6px; min-width:0;
+  }
+  .passive .head{display:flex; justify-content:space-between; align-items:center; gap:8px;}
+  .passive .head b{font-size:12.5px;}
+  .passive .desc{font-size:11.5px; color:var(--fg-dim); line-height:1.5;}
+  .passive .levelrow{display:flex; align-items:center; gap:8px;}
+  .passive .levelrow output{font-family:var(--font-display); width:22px; text-align:right;}
+  .passive.locked{opacity:.5;}
+  .passive .locknote{font-size:10.5px; color:var(--danger);}
+  .tier-head{font-family:var(--font-display); font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--accent); margin-top:6px;}
+  .tier-head:first-child{margin-top:0;}
+
+  button{
+    font-family:var(--font-display); font-size:13px; font-weight:600;
+    border:1px solid var(--accent); background:var(--accent); color:var(--accent-ink);
+    border-radius:7px; padding:10px 14px; cursor:pointer; letter-spacing:.02em;
+  }
+  button.secondary{background:transparent; color:var(--fg); border-color:var(--border);}
+  button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visible{outline:2px solid var(--accent-2); outline-offset:2px;}
+  .iconbtn{width:26px; height:26px; padding:0; border-radius:6px; font-size:14px; display:flex; align-items:center; justify-content:center; background:transparent; color:var(--danger); border-color:var(--border);}
+
+  .derived-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(110px,1fr)); gap:8px;}
+  .tile{background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:9px 10px; min-width:0;}
+  .tile .label{font-size:10.5px; color:var(--fg-dim); text-transform:uppercase; letter-spacing:.06em;}
+  .tile .value{font-family:var(--font-display); font-size:18px; margin-top:2px;}
+
+  .monster-row{display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px;}
+
+  .stage{
+    position:relative; height:200px; border:1px solid var(--border); border-radius:10px;
+    background:
+      radial-gradient(ellipse at 50% 100%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 60%),
+      repeating-linear-gradient(90deg, var(--surface-2) 0 2px, transparent 2px 28px), var(--surface);
+    overflow:hidden; display:flex; align-items:flex-end; justify-content:center; padding-bottom:16px;
+  }
+  .stage-hpwrap{position:absolute; top:10px; left:10px; right:10px; display:flex; align-items:center; gap:8px;}
+  .stage-hpbar{flex:1; height:12px; border-radius:6px; background:var(--surface-2); border:1px solid var(--border); overflow:hidden;}
+  .stage-hpfill{height:100%; background:linear-gradient(90deg, var(--danger), var(--accent)); transition:width .18s ease;}
+  .stage-hptext{font-size:11px; color:var(--fg-dim); white-space:nowrap;}
+  .dummy{position:relative; width:64px; height:120px; transition:filter .3s ease, opacity .3s ease;}
+  .dummy .pole{position:absolute; bottom:0; left:50%; width:6px; height:46px; background:var(--border); transform:translateX(-50%); border-radius:2px;}
+  .dummy .sack{
+    position:absolute; bottom:38px; left:50%; width:48px; height:62px; transform:translateX(-50%);
+    background:linear-gradient(180deg, var(--surface-2), var(--border)); border:2px solid var(--border); border-radius:10px 10px 16px 16px;
+  }
+  .dummy .face{
+    position:absolute; bottom:78px; left:50%; width:30px; height:30px; transform:translateX(-50%);
+    background:var(--surface-2); border:2px solid var(--border); border-radius:50%;
+  }
+  .dummy.down{filter:grayscale(1) brightness(.6); opacity:.6;}
+  .dummy.hitflash .sack{animation:dummyflash .18s ease;}
+  @keyframes dummyflash{ 0%{filter:brightness(1.9);} 100%{filter:brightness(1);} }
+  .floaters{position:absolute; inset:0; pointer-events:none;}
+  .floatnum{
+    position:absolute; bottom:86px; left:50%; font-family:var(--font-display); font-weight:700; font-size:15px;
+    color:var(--fg); text-shadow:0 1px 2px rgba(0,0,0,.4); animation:floatup 0.9s ease-out forwards; white-space:nowrap;
+  }
+  .floatnum.crit{color:var(--danger); font-size:19px;}
+  .floatnum.magic{color:var(--accent-2);}
+  .floatnum.magiccrit{color:var(--accent-2); font-size:19px;}
+  .floatnum.miss{color:var(--fg-dim); font-weight:500;}
+  .floatnum.ko{color:var(--danger); font-size:22px;}
+  @keyframes floatup{
+    0%{transform:translate(-50%,0) scale(.9); opacity:0;}
+    15%{transform:translate(-50%,-10px) scale(1.05); opacity:1;}
+    100%{transform:translate(calc(-50% + var(--drift,0px)),-64px) scale(1); opacity:0;}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .floatnum{animation:none; opacity:1; bottom:60px;}
+    .dummy.hitflash .sack{animation:none;}
+  }
+  .stage-msg{
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    font-family:var(--font-display); font-size:13px; color:var(--fg-dim);
+    background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:5px 10px; text-align:center;
+  }
+
+  .results-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px;}
+  .result-tile{background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:12px; min-width:0;}
+  .result-tile .label{font-size:11px; color:var(--fg-dim);}
+  .result-tile .value{font-family:var(--font-display); font-size:22px; margin-top:3px;}
+  .result-tile.accent{border-color:var(--accent);}
+  .result-tile.magic{border-color:var(--accent-2);}
+
+  .bar-stack{display:flex; height:14px; border-radius:7px; overflow:hidden; border:1px solid var(--border);}
+  .bar-seg{height:100%;}
+  .legend{display:flex; gap:14px; flex-wrap:wrap; font-size:11.5px; color:var(--fg-dim); margin-top:6px;}
+  .legend .dot{display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; vertical-align:-1px;}
+
+  .log{max-height:220px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; background:var(--surface-2); font-size:12px;}
+  .log .row{display:flex; gap:8px; padding:6px 10px; border-bottom:1px solid var(--border); font-family:var(--font-display);}
+  .log .row:last-child{border-bottom:none;}
+  .log .t{color:var(--fg-dim); width:46px; flex:none;}
+  .log .ev{flex:1; min-width:0;}
+  .log .crit{color:var(--danger); font-weight:600;}
+  .log .magic{color:var(--accent-2);}
+  .log .miss{color:var(--fg-dim);}
+
+  .note{font-size:11.5px; color:var(--fg-dim); border-left:2px solid var(--border); padding-left:9px;}
+  .divider{height:1px; background:var(--border); border:none; margin:2px 0;}
+  .inline-two{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  .foot{color:var(--fg-dim); font-size:11px; text-align:center; padding-top:6px;}
+
+  /* --- Formulas (backend) view --- */
+  .formula-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px;}
+  .card{border:1px solid var(--border); border-radius:8px; background:var(--surface-2); padding:12px; display:flex; flex-direction:column; gap:10px; min-width:0;}
+  .card .cardhead{display:flex; justify-content:space-between; align-items:center; gap:8px;}
+  .card .cardid{font-family:var(--font-display); font-size:11px; color:var(--fg-dim);}
+  .card .cardbudget{font-size:11px; color:var(--accent-2);}
+  .subgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(110px,1fr)); gap:8px;}
+  .chipset{display:flex; flex-wrap:wrap; gap:6px;}
+  .chk-chip{display:flex; align-items:center; gap:5px; border:1px solid var(--border); background:var(--surface); border-radius:999px; padding:4px 9px; font-size:11px; color:var(--fg-dim);}
+  .chk-chip input{margin:0; accent-color:var(--accent);}
+  .effect-row{display:grid; grid-template-columns:1.2fr 80px 1fr 1fr 26px; gap:6px; align-items:center;}
+  .effect-row select, .effect-row input{font-size:11.5px; padding:6px;}
+  .subhead{font-size:11px; color:var(--fg-dim); text-transform:uppercase; letter-spacing:.05em; margin-top:2px;}
+  .add-row{display:grid; grid-template-columns:1fr 1fr auto; gap:8px; align-items:end;}
+</style>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet">
+
+<div class="shell">
+  <header class="top">
+    <span class="eyebrow">Combat Formula Sandbox</span>
+    <h1>RO Status Lab</h1>
+    <p>จำลองการคำนวณสเตตัส อาวุธ สกิล passive และ autospell — ปรับ build แล้วทดสอบใส่ดัมมี่ หรือสลับไปแก้สูตรเบื้องหลังได้จากแท็บ "ตั้งค่าสูตร"</p>
+  </header>
+
+  <nav class="tabs">
+    <a href="#lab" class="tab-link" data-view="lab">ห้องทดลอง</a>
+    <a href="#formulas" class="tab-link" data-view="formulas">ตั้งค่าสูตร (Backend)</a>
+  </nav>
+
+  <!-- ============================================================ -->
+  <!-- VIEW: LAB                                                     -->
+  <!-- ============================================================ -->
+  <section id="view-lab">
+    <div class="layout">
+      <div style="display:flex; flex-direction:column; gap:18px; min-width:0;">
+
+        <div class="panel">
+          <h2>ตัวละคร <span class="tag">Level &amp; Class</span></h2>
+          <label class="field"><b>Base Level</b>
+            <input type="number" id="inLevel" min="1" max="99" value="50">
+          </label>
+          <label class="field"><b>Class</b>
+            <select id="inClass"></select>
+          </label>
+          <div class="note" id="classNote"></div>
+        </div>
+
+        <div class="panel">
+          <h2>Raw Stats <span class="tag">กดแต้มแบบ RO</span></h2>
+          <div class="points-bar">
+            <div><div class="label">แต้มคงเหลือ</div><div class="value num" id="pointsLeft">0</div></div>
+            <button class="secondary" id="btnResetStats" type="button">รีเซ็ต</button>
+          </div>
+          <div class="stat-grid" id="statGrid"></div>
+          <div class="note">1 แต้มแรกของแต่ละสเตตัสได้ฟรี ต้นทุนแต้มถัดไปเพิ่มตามค่าที่มีอยู่ เพดานสูงสุดปรับได้ในแท็บตั้งค่าสูตร • กดปุ่ม +/− ค้างไว้เพื่ออัพเร็วขึ้น</div>
+        </div>
+
+        <div class="panel">
+          <h2>อาวุธ <span class="tag">Weapon Profile</span></h2>
+          <label class="field"><b>มือหลัก (Main Hand)</b>
+            <select id="inWeapon"></select>
+          </label>
+          <label class="field"><b>มือรอง (Off Hand)</b>
+            <select id="inOffhand"></select>
+          </label>
+          <div class="note" id="weaponNote"></div>
+        </div>
+
+        <div class="panel">
+          <h2>สกิล Passive <span class="tag">ทดสอบเบื้องต้น</span></h2>
+          <div id="passiveList" style="display:flex; flex-direction:column; gap:8px;"></div>
+          <hr class="divider">
+          <div class="passive">
+            <div class="head"><b>Autospell (ไอเทม/อาวุธ)</b>
+              <label class="chip" style="border:1px solid var(--border); border-radius:999px; padding:5px 10px; font-size:12px; cursor:pointer; color:var(--fg-dim); display:flex; align-items:center; gap:6px;">
+                <input type="checkbox" id="inAutospellOn">เปิดใช้งาน
+              </label>
+            </div>
+            <div class="desc">จำลองของแบบ Hydra Card — ตีแล้วมีโอกาสร่ายเวทแทรก ใช้ effective INT ของผู้โจมตีเสมอ</div>
+            <div class="inline-two">
+              <label class="field">Trigger % ต่อการตี
+                <input type="number" id="inAsChance" min="0" max="100" value="12">
+              </label>
+              <label class="field">Spell Multiplier
+                <input type="number" id="inAsMult" min="0.1" max="10" step="0.1" value="2">
+              </label>
+            </div>
+            <label class="field">ICD (วินาที)
+              <input type="number" id="inAsIcd" min="0.5" max="10" step="0.5" value="4">
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:18px; min-width:0;">
+
+        <div class="panel">
+          <h2>ดัมมี่ม้อนสเตอร์ <span class="tag">Test Target</span></h2>
+          <div class="monster-row">
+            <label class="field">DEF<input type="number" id="mDef" min="0" max="500" value="40"></label>
+            <label class="field">MDEF<input type="number" id="mMdef" min="0" max="500" value="30"></label>
+            <label class="field">FLEE<input type="number" id="mFlee" min="0" max="300" value="60"></label>
+            <label class="field">Max HP<input type="number" id="mHp" min="100" max="200000" value="20000"></label>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>สเตตัสที่คำนวณได้ <span class="tag">Derived Stats</span></h2>
+          <div class="derived-grid" id="derivedGrid"></div>
+        </div>
+
+        <div class="panel">
+          <h2>จำลองการต่อสู้แบบเรียลไทม์ <span class="tag">Live Dummy</span></h2>
+          <div class="stage" id="monsterStage">
+            <div class="stage-hpwrap">
+              <div class="stage-hpbar"><div class="stage-hpfill" id="monsterHpFill" style="width:100%"></div></div>
+              <div class="stage-hptext num" id="monsterHpText">0 / 0</div>
+            </div>
+            <div class="dummy" id="dummySprite"><div class="pole"></div><div class="sack"></div><div class="face"></div></div>
+            <div class="floaters" id="floaters"></div>
+            <div class="stage-msg" id="stageMsg" hidden>กด "เริ่มต่อสู้" เพื่อดูดาเมจเด้งแบบเรียลไทม์</div>
+          </div>
+          <label class="chip" style="border:1px solid var(--border); border-radius:999px; padding:5px 10px; font-size:12px; cursor:pointer; color:var(--fg-dim); display:inline-flex; align-items:center; gap:6px; align-self:flex-start;">
+            <input type="checkbox" id="inMaxAspdTest">ทดสอบที่ ASPD ตัน (<span id="aspdCapLabel">193</span>) — ไม่แตะสเตตัสจริง ใช้ดูอัตรา autospell ที่ความไวสูงสุด
+          </label>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button id="btnToggleCombat">▶ เริ่มต่อสู้</button>
+            <button class="secondary" id="btnResetCombat" type="button">รีเซ็ต HP/สถิติ</button>
+          </div>
+          <div class="results-grid">
+            <div class="result-tile accent"><div class="label">Total Damage</div><div class="value num" id="rTotal">0</div></div>
+            <div class="result-tile"><div class="label">DPS (รวมเวลาที่สู้)</div><div class="value num" id="rDps">0</div></div>
+            <div class="result-tile"><div class="label">ล้มแล้ว</div><div class="value num" id="rKills">0</div></div>
+            <div class="result-tile"><div class="label">Physical Crit Rate</div><div class="value num" id="rPCrit">0%</div></div>
+            <div class="result-tile magic"><div class="label">Autospell Procs</div><div class="value num" id="rProcs">0</div></div>
+            <div class="result-tile magic"><div class="label">Magic Crit Rate</div><div class="value num" id="rMCrit">0%</div></div>
+          </div>
+          <div>
+            <div class="bar-stack" id="dmgBar"></div>
+            <div class="legend">
+              <span><span class="dot" style="background:var(--accent)"></span>Physical</span>
+              <span><span class="dot" style="background:var(--accent-2)"></span>Autospell</span>
+              <span><span class="dot" style="background:var(--fg-dim)"></span>Double Attack</span>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:12px; color:var(--fg-dim); margin-bottom:6px;">Log เหตุการณ์ล่าสุด</div>
+            <div class="log" id="eventLog"></div>
+          </div>
+          <div class="note">ปรับ build สูตร หรือดัมมี่ระหว่างสู้อยู่จะหยุดการต่อสู้อัตโนมัติ เพราะค่าที่คำนวณไว้เปลี่ยนไป</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- VIEW: FORMULAS (BACKEND)                                      -->
+  <!-- ============================================================ -->
+  <section id="view-formulas" hidden style="display:flex; flex-direction:column; gap:18px;">
+
+    <div class="panel">
+      <h2>นำเข้า / ส่งออกค่าสูตรทั้งหมด</h2>
+      <div class="note">ค่าทุกหมวดบันทึกอัตโนมัติไว้ในเบราว์เซอร์นี้แล้ว ใช้ส่วนนี้เมื่อต้องการสำรองหรือย้ายค่าไปเครื่องอื่น</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="secondary" id="btnExportConfig" type="button">คัดลอกค่าปัจจุบันเป็น JSON</button>
+        <button class="secondary" id="btnResetAllConfig" type="button">คืนค่าเริ่มต้นทั้งหมด</button>
+      </div>
+      <textarea id="configBox" rows="5" placeholder="วาง JSON ที่เคยคัดลอกไว้ตรงนี้ แล้วกดนำเข้า"></textarea>
+      <button id="btnImportConfig" type="button">นำเข้า JSON</button>
+      <div class="note" id="configMsg">&nbsp;</div>
+    </div>
+
+    <div class="panel">
+      <h2>ระบบแต้มสเตตัส <span class="tag">Status Point System</span>
+        <button class="secondary catreset" data-cat="statusPointSystem" type="button">คืนค่าเริ่มต้น</button></h2>
+      <div class="formula-grid" id="cat-statusPointSystem"></div>
+      <div class="note">startPoints = แต้มเริ่มต้นที่ Lv.1 · levelUpOffset/levelUpDivisor กำหนดสูตรแต้มที่ได้ต่อเลเวล floor((level+offset)/divisor) · statCap = เพดาน raw stat</div>
+    </div>
+
+    <div class="panel">
+      <h2>ค่าคงที่พื้นฐาน <span class="tag">Base Constants</span>
+        <button class="secondary catreset" data-cat="baseConstants" type="button">คืนค่าเริ่มต้น</button></h2>
+      <div class="formula-grid" id="cat-baseConstants"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Diminishing Curve ต่อสเตตัส <span class="tag">Stat Curve</span>
+        <button class="secondary catreset" data-cat="statCurve" type="button">คืนค่าเริ่มต้น</button></h2>
+      <div id="cat-statCurve" style="display:flex; flex-direction:column; gap:10px;"></div>
+      <div class="note">breakpoint 1/2 = จุดหักมุม, slope 1/2/3 = อัตราผลลัพธ์ต่อแต้มในแต่ละช่วง</div>
+    </div>
+
+    <div class="panel">
+      <h2>คลาส <span class="tag">Classes</span>
+        <button class="secondary catreset" data-cat="classes" type="button">คืนค่าเริ่มต้น</button></h2>
+      <div id="cat-classes" style="display:flex; flex-direction:column; gap:10px;"></div>
+      <div class="add-row">
+        <label class="field">id คลาสใหม่<input type="text" id="newClassId" placeholder="เช่น monk"></label>
+        <label class="field">ชื่อที่แสดง<input type="text" id="newClassName" placeholder="เช่น นักบวช"></label>
+        <button id="btnAddClass" type="button">เพิ่มคลาส</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>อาวุธ &amp; โล่ <span class="tag">Weapons</span>
+        <button class="secondary catreset" data-cat="weapons" type="button">คืนค่าเริ่มต้น</button></h2>
+      <div class="subhead">โล่ (Off-Hand)</div>
+      <div id="cat-shield"></div>
+      <div class="subhead">รายการอาวุธ</div>
+      <div id="cat-weapons" style="display:flex; flex-direction:column; gap:12px;"></div>
+      <div class="add-row">
+        <label class="field">id อาวุธใหม่<input type="text" id="newWeaponId" placeholder="เช่น spear"></label>
+        <label class="field">ชื่อที่แสดง<input type="text" id="newWeaponName" placeholder="เช่น หอก"></label>
+        <button id="btnAddWeapon" type="button">เพิ่มอาวุธ</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Magic Crit Triad <span class="tag">LUK · DEX · INT</span>
+        <button class="secondary catreset" data-cat="magicCrit" type="button">คืนค่าเริ่มต้น</button></h2>
+      <div id="cat-magicCrit" style="display:flex; flex-direction:column; gap:12px;"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Global Mitigation <span class="tag">Cap กันโอเวอร์</span>
+        <button class="secondary catreset" data-cat="mitigation" type="button">คืนค่าเริ่มต้น</button></h2>
+      <div class="formula-grid" id="cat-mitigation"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Autospell Global <span class="tag">Stacking Cap</span>
+        <button class="secondary catreset" data-cat="autospellGlobal" type="button">คืนค่าเริ่มต้น</button></h2>
+      <div class="formula-grid" id="cat-autospellGlobal"></div>
+    </div>
+
+    <div class="panel">
+      <h2>สกิล Passive <span class="tag">Effects</span>
+        <button class="secondary catreset" data-cat="passives" type="button">คืนค่าเริ่มต้น</button></h2>
+      <div id="cat-passives" style="display:flex; flex-direction:column; gap:12px;"></div>
+      <div class="add-row">
+        <label class="field">id passive ใหม่<input type="text" id="newPassiveId" placeholder="เช่น archeryMastery"></label>
+        <label class="field">ชื่อที่แสดง<input type="text" id="newPassiveName" placeholder="เช่น Archery Mastery"></label>
+        <button id="btnAddPassive" type="button">เพิ่ม Passive</button>
+      </div>
+    </div>
+
+  </section>
+
+  <div class="foot">สูตรทั้งหมดเป็นระบบที่ออกแบบขึ้นเอง อิงแนวคิดจาก Ragnarok Online แต่ปรับสมดุลใหม่ ไม่ใช่ตัวเลขจริงจากเกม</div>
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  /* ========================================================================
+     0) DEFAULT CONFIG — ทุกสูตรของระบบรวมไว้ในก้อนเดียว แก้ที่นี่ได้ทั้งหมด
+  ======================================================================== */
+  const DEFAULT_CONFIG = {
+    statusPointSystem: { startPoints:48, levelUpOffset:9, levelUpDivisor:4, statCap:99 },
+
+    baseConstants: {
+      hpPerVit:12, hpPerLevel:20, spPerInt:8, spPerLevel:8, matkPerInt:2.5,
+      hitBase:50, hitPerDex:1, fleeBase:50, fleePerAgi:0.8, fleePerLuk:0.3,
+      aspdBase:100, aspdPerAgi:0.4, aspdPerDex:0.1, aspdCap:193, critBase:1, critPerLuk:0.3,
+      defPerVit:0.5, mdefPerInt:0.5, hpRegenPerVit:0.05, castReductionPerDex:0.15,
+    },
+
+    statCurve: {
+      str:{breakpoints:[50,100], slopes:[1.0,0.7,0.4]},
+      agi:{breakpoints:[50,100], slopes:[1.0,0.65,0.35]},
+      vit:{breakpoints:[50,100], slopes:[1.0,0.75,0.45]},
+      int:{breakpoints:[50,100], slopes:[1.0,0.7,0.4]},
+      dex:{breakpoints:[50,100], slopes:[1.0,0.7,0.4]},
+      luk:{breakpoints:[50,100], slopes:[1.0,0.8,0.5]},
+    },
+
+    classes: {
+      novice:   {name:'Novice',   hpCoef:1.0, spCoef:1.0, desc:'จุดเริ่มต้น สมดุลทุกด้าน ยังไม่เอียงไปทางไหน'},
+      swordman: {name:'นักดาบ',   hpCoef:1.4, spCoef:0.6, desc:'เน้น HP ชัดเจน แลกกับ SP ที่ต่ำ — tank แถวหน้า'},
+      thief:    {name:'โจร',      hpCoef:1.1, spCoef:0.9, desc:'physical ผสม เอียง HP เล็กน้อย คล่องตัวสูง'},
+      archer:   {name:'นักธนู',   hpCoef:1.0, spCoef:1.0, desc:'ranged physical สมดุลกลาง ไม่ tank ไม่ nuke'},
+      mage:     {name:'จอมเวท',   hpCoef:0.6, spCoef:1.4, desc:'เน้น SP ชัดเจน แลกกับ HP ที่เปราะบาง — nuker'},
+    },
+
+    weapons: {
+      unarmed:  { name:'มือเปล่า',   weaponClass:'unarmed', slotType:'1H', damageType:'blunt',
+        atk:{stat:'str', coeff:0.5, stat2:'', coeff2:0}, aspdOffset:0, autospellEfficiency:1.0,
+        special:{critBonusFlat:0, hitBonusFlat:0, hitPenalty:0, defPenetrationPercent:0, hpRegenOnHitPercent:0, matkPercent:0, castReductionBonus:0},
+        affinity:[] },
+      sword_1h: { name:'ดาบ 1 มือ', weaponClass:'sword', slotType:'1H', damageType:'slash',
+        atk:{stat:'str', coeff:1.0, stat2:'', coeff2:0}, aspdOffset:0, autospellEfficiency:1.0,
+        special:{critBonusFlat:0, hitBonusFlat:0, hitPenalty:0, defPenetrationPercent:0, hpRegenOnHitPercent:0, matkPercent:0, castReductionBonus:0},
+        affinity:['swordman'] },
+      sword_2h: { name:'ดาบ 2 มือ', weaponClass:'sword', slotType:'2H', damageType:'slash',
+        atk:{stat:'str', coeff:1.4, stat2:'', coeff2:0}, aspdOffset:-15, autospellEfficiency:1.0,
+        special:{critBonusFlat:0, hitBonusFlat:0, hitPenalty:0, defPenetrationPercent:0, hpRegenOnHitPercent:0, matkPercent:0, castReductionBonus:0},
+        affinity:['swordman'] },
+      axe:      { name:'ขวาน', weaponClass:'axe', slotType:'1H', damageType:'slash',
+        atk:{stat:'str', coeff:1.1, stat2:'', coeff2:0}, aspdOffset:-8, autospellEfficiency:1.0,
+        special:{critBonusFlat:0, hitBonusFlat:0, hitPenalty:10, defPenetrationPercent:0.15, hpRegenOnHitPercent:0, matkPercent:0, castReductionBonus:0},
+        affinity:['swordman'] },
+      mace:     { name:'กระบอง', weaponClass:'mace', slotType:'1H', damageType:'blunt',
+        atk:{stat:'str', coeff:0.8, stat2:'vit', coeff2:0.3}, aspdOffset:0, autospellEfficiency:1.0,
+        special:{critBonusFlat:0, hitBonusFlat:0, hitPenalty:0, defPenetrationPercent:0, hpRegenOnHitPercent:0.005, matkPercent:0, castReductionBonus:0},
+        affinity:['swordman'] },
+      dagger:   { name:'กริช', weaponClass:'dagger', slotType:'1H', damageType:'pierce',
+        atk:{stat:'agi', coeff:0.7, stat2:'luk', coeff2:0.3}, aspdOffset:20, autospellEfficiency:1.0,
+        special:{critBonusFlat:5, hitBonusFlat:0, hitPenalty:0, defPenetrationPercent:0, hpRegenOnHitPercent:0, matkPercent:0, castReductionBonus:0},
+        affinity:['thief'] },
+      bow:      { name:'ธนู', weaponClass:'bow', slotType:'2H', damageType:'pierce',
+        atk:{stat:'dex', coeff:1.0, stat2:'', coeff2:0}, aspdOffset:5, autospellEfficiency:1.0,
+        special:{critBonusFlat:0, hitBonusFlat:15, hitPenalty:0, defPenetrationPercent:0, hpRegenOnHitPercent:0, matkPercent:0, castReductionBonus:0},
+        affinity:['archer'] },
+      staff:    { name:'ไม้เท้า', weaponClass:'staff', slotType:'2H', damageType:'magic',
+        atk:{stat:'str', coeff:0.1, stat2:'', coeff2:0}, aspdOffset:0, autospellEfficiency:0.4,
+        special:{critBonusFlat:0, hitBonusFlat:0, hitPenalty:0, defPenetrationPercent:0, hpRegenOnHitPercent:0, matkPercent:0.20, castReductionBonus:0.10},
+        affinity:['mage'] },
+    },
+
+    shieldProfile: { aspdOffset:-5, blockChance:0.15, defFlat:15 },
+
+    magicCrit: {
+      chance:{base:0, lukScalar:0.45},
+      mdefIgnore:{base:0.5, dexScalar:0.002, cap:0.70},
+      critDamageBonus:{base:0.10, intScalar:0.0008, cap:0.25},
+    },
+
+    mitigation: { maxDodgeChance:0.60, maxPhysicalReduction:0.80, maxMagicReduction:0.80, softDefK:300 },
+
+    autospellGlobal: { maxCombinedTriggerChance:0.30 },
+
+    // Passive Skill Tree — classId 'any' = ทุกคลาสเห็น (รวม Novice), tier = ลำดับชั้น,
+    // requires = {passiveId, minLevel} เงื่อนไขปลดล็อก (passiveId ว่าง = ไม่มีเงื่อนไข)
+    passives: [
+      // --- Universal (ทุกคลาสรวม Novice) ---
+      { id:'vitalityTraining', name:'ฝึกพละกำลังพื้นฐาน', classId:'any', tier:1, maxLevel:5,
+        desc:'เพิ่ม HP รวมเป็นเปอร์เซ็นต์ พื้นฐานที่ทุกสายอาชีพฝึกได้',
+        requires:{passiveId:'', minLevel:0},
+        effects:[ {target:'hpPercent', perLevel:0.02, weaponClassOnly:'', excludeWeaponClass:''} ] },
+      { id:'battleAwareness', name:'ไหวพริบสนามรบ', classId:'any', tier:1, maxLevel:5,
+        desc:'เพิ่ม HIT และ FLEE เล็กน้อย ช่วยทั้งตีแม่นและหลบหลีก',
+        requires:{passiveId:'', minLevel:0},
+        effects:[ {target:'hitFlat', perLevel:2, weaponClassOnly:'', excludeWeaponClass:''},
+                  {target:'fleeFlat', perLevel:2, weaponClassOnly:'', excludeWeaponClass:''} ] },
+      { id:'steadyBreathing', name:'ลมหายใจมั่นคง', classId:'any', tier:1, maxLevel:5,
+        desc:'ฟื้น HP ต่อวินาทีเพิ่มขึ้น และเพิ่ม SP max เล็กน้อย',
+        requires:{passiveId:'', minLevel:0},
+        effects:[ {target:'hpRegenFlat', perLevel:0.03, weaponClassOnly:'', excludeWeaponClass:''},
+                  {target:'spPercent', perLevel:0.02, weaponClassOnly:'', excludeWeaponClass:''} ] },
+      { id:'autospellCatalyst', name:'Autospell Catalyst', classId:'any', tier:2, maxLevel:5,
+        desc:'ได้โอกาส autospell ติดตัวจากสกิล ไม่ต้องพึ่งไอเทม (ถูกหักประสิทธิภาพตามอาวุธเหมือน autospell ไอเทม)',
+        requires:{passiveId:'steadyBreathing', minLevel:3},
+        effects:[ {target:'passiveAutospellChance', perLevel:0.015, weaponClassOnly:'', excludeWeaponClass:''} ] },
+
+      // --- Swordman Tree ---
+      { id:'swWeaponMastery', name:'ชำนาญอาวุธประชิด', classId:'swordman', tier:1, maxLevel:5,
+        desc:'เพิ่ม ATK แบนตามเลเวล จากการฝึกดาบ/ขวาน/กระบองอย่างหนัก',
+        requires:{passiveId:'', minLevel:0},
+        effects:[ {target:'atkFlat', perLevel:5, weaponClassOnly:'', excludeWeaponClass:'staff'} ] },
+      { id:'swToughness', name:'ร่างกายแกร่ง', classId:'swordman', tier:1, maxLevel:5,
+        desc:'เพิ่ม DEF แบนตามเลเวล แถวหน้าที่รับแรงกระแทกได้มากขึ้น',
+        requires:{passiveId:'', minLevel:0},
+        effects:[ {target:'defFlat', perLevel:2, weaponClassOnly:'', excludeWeaponClass:''} ] },
+      { id:'swProvokeStance', name:'ท่ายั่วยุ', classId:'swordman', tier:2, maxLevel:5,
+        desc:'เพิ่มโอกาสคริติคอลกายภาพ จากจังหวะเปิดช่องที่ฝึกมา',
+        requires:{passiveId:'swWeaponMastery', minLevel:3},
+        effects:[ {target:'critFlat', perLevel:1, weaponClassOnly:'', excludeWeaponClass:''} ] },
+      { id:'swShieldDiscipline', name:'วินัยโล่', classId:'swordman', tier:2, maxLevel:5,
+        desc:'เพิ่ม DEF เพิ่มเติมสำหรับสายตั้งรับ',
+        requires:{passiveId:'swToughness', minLevel:3},
+        effects:[ {target:'defFlat', perLevel:3, weaponClassOnly:'', excludeWeaponClass:''} ] },
+      { id:'swBerserkerSoul', name:'จิตวิญญาณนักรบบ้าคลั่ง', classId:'swordman', tier:3, maxLevel:3,
+        desc:'ยอดฝีมือระดับสูง เพิ่ม ATK ก้อนใหญ่ (capstone)',
+        requires:{passiveId:'swProvokeStance', minLevel:3},
+        effects:[ {target:'atkFlat', perLevel:12, weaponClassOnly:'', excludeWeaponClass:'staff'} ] },
+
+      // --- Thief Tree ---
+      { id:'thBladeMastery', name:'ชำนาญกริช', classId:'thief', tier:1, maxLevel:5,
+        desc:'เพิ่ม ATK แบนตามเลเวล เน้นสายกริชคล่องตัว',
+        requires:{passiveId:'', minLevel:0},
+        effects:[ {target:'atkFlat', perLevel:4, weaponClassOnly:'', excludeWeaponClass:'staff'} ] },
+      { id:'thAgilityTraining', name:'ฝึกความคล่องตัว', classId:'thief', tier:1, maxLevel:5,
+        desc:'เพิ่ม ASPD แบนตามเลเวล ตีได้ถี่ขึ้น',
+        requires:{passiveId:'', minLevel:0},
+        effects:[ {target:'aspdFlat', perLevel:2, weaponClassOnly:'', excludeWeaponClass:''} ] },
+      { id:'thDoubleAttack', name:'โจมตีคู่', classId:'thief', tier:2, maxLevel:5,
+        desc:'โอกาสโจมตีซ้ำทันทีหลังตีโดน เฉพาะกริช',
+        requires:{passiveId:'thBladeMastery', minLevel:3},
+        effects:[ {target:'doubleAttackChance', perLevel:0.04, weaponClassOnly:'dagger', excludeWeaponClass:''} ] },
+      { id:'thEvasion', name:'หลบหลีกชำนาญ', classId:'thief', tier:2, maxLevel:5,
+        desc:'เพิ่ม FLEE แบนตามเลเวล หลบการโจมตีกายภาพได้ดีขึ้น',
+        requires:{passiveId:'thAgilityTraining', minLevel:3},
+        effects:[ {target:'fleeFlat', perLevel:4, weaponClassOnly:'', excludeWeaponClass:''} ] },
+      { id:'thShadowStrike', name:'จู่โจมเงา', classId:'thief', tier:3, maxLevel:3,
+        desc:'เพิ่มโอกาสคริติคอลก้อนใหญ่ (capstone)',
+        requires:{passiveId:'thDoubleAttack', minLevel:3},
+        effects:[ {target:'critFlat', perLevel:3, weaponClassOnly:'', excludeWeaponClass:''} ] },
+
+      // --- Archer Tree ---
+      { id:'arBowMastery', name:'ชำนาญธนู', classId:'archer', tier:1, maxLevel:5,
+        desc:'เพิ่ม ATK แบนตามเลเวล จากการฝึกยิงธนู',
+        requires:{passiveId:'', minLevel:0},
+        effects:[ {target:'atkFlat', perLevel:4, weaponClassOnly:'', excludeWeaponClass:'staff'} ] },
+      { id:'arEagleEye', name:'สายตานกอินทรี', classId:'archer', tier:1, maxLevel:5,
+        desc:'เพิ่ม HIT แบนตามเลเวล เล็งแม่นขึ้น',
+        requires:{passiveId:'', minLevel:0},
+        effects:[ {target:'hitFlat', perLevel:3, weaponClassOnly:'', excludeWeaponClass:''} ] },
+      { id:'arRapidFire', name:'ยิงเร็ว', classId:'archer', tier:2, maxLevel:5,
+        desc:'เพิ่ม ASPD แบนตามเลเวล ยิงถี่ขึ้น',
+        requires:{passiveId:'arBowMastery', minLevel:3},
+        effects:[ {target:'aspdFlat', perLevel:3, weaponClassOnly:'', excludeWeaponClass:''} ] },
+      { id:'arSharpshooter', name:'มือแม่นปืน', classId:'archer', tier:2, maxLevel:5,
+        desc:'เพิ่มโอกาสคริติคอลกายภาพตามเลเวล',
+        requires:{passiveId:'arEagleEye', minLevel:3},
+        effects:[ {target:'critFlat', perLevel:2, weaponClassOnly:'', excludeWeaponClass:''} ] },
+      { id:'arHuntersInstinct', name:'สัญชาตญาณนักล่า', classId:'archer', tier:3, maxLevel:3,
+        desc:'เพิ่ม ATK ก้อนใหญ่ (capstone)',
+        requires:{passiveId:'arRapidFire', minLevel:3},
+        effects:[ {target:'atkFlat', perLevel:8, weaponClassOnly:'', excludeWeaponClass:'staff'} ] },
+
+      // --- Mage Tree ---
+      { id:'mgSpellMastery', name:'ชำนาญเวทมนตร์', classId:'mage', tier:1, maxLevel:5,
+        desc:'เพิ่ม MATK% ตามเลเวล',
+        requires:{passiveId:'', minLevel:0},
+        effects:[ {target:'matkPercent', perLevel:0.03, weaponClassOnly:'', excludeWeaponClass:''} ] },
+      { id:'mgManaTraining', name:'ฝึกพลังมานา', classId:'mage', tier:1, maxLevel:5,
+        desc:'เพิ่ม SP max% ตามเลเวล',
+        requires:{passiveId:'', minLevel:0},
+        effects:[ {target:'spPercent', perLevel:0.04, weaponClassOnly:'', excludeWeaponClass:''} ] },
+      { id:'mgArcaneFocus', name:'สมาธิเวทอาร์เคน', classId:'mage', tier:2, maxLevel:5,
+        desc:'เพิ่มโอกาส Magic Crit โดยตรง',
+        requires:{passiveId:'mgSpellMastery', minLevel:3},
+        effects:[ {target:'magicCritChanceFlat', perLevel:1.2, weaponClassOnly:'', excludeWeaponClass:''} ] },
+      { id:'mgInsight', name:'ความเข้าใจทะลุ', classId:'mage', tier:2, maxLevel:5,
+        desc:'เพิ่ม MDEF Ignore ตอนติดคริเวท',
+        requires:{passiveId:'mgManaTraining', minLevel:3},
+        effects:[ {target:'mdefIgnoreFlat', perLevel:0.02, weaponClassOnly:'', excludeWeaponClass:''} ] },
+      { id:'mgArchmageWisdom', name:'ปัญญาจอมเวทชั้นสูง', classId:'mage', tier:3, maxLevel:3,
+        desc:'เพิ่ม Crit Damage Bonus ของเวทก้อนใหญ่ (capstone)',
+        requires:{passiveId:'mgArcaneFocus', minLevel:3},
+        effects:[ {target:'critDamageBonusFlat', perLevel:0.03, weaponClassOnly:'', excludeWeaponClass:''} ] },
+    ],
+  };
+
+  const PASSIVE_TARGETS = ['atkFlat','hitFlat','fleeFlat','critFlat','aspdFlat','defFlat','mdefFlat','hpPercent',
+    'matkPercent','spPercent','hpRegenFlat','castReductionFlat','doubleAttackChance','passiveAutospellChance',
+    'magicCritChanceFlat','mdefIgnoreFlat','critDamageBonusFlat'];
+  const TARGET_LABELS = {
+    atkFlat:'ATK (+แบน)', hitFlat:'HIT (+แบน)', fleeFlat:'FLEE (+แบน)', critFlat:'Phys Crit% (+แบน)',
+    aspdFlat:'ASPD (+แบน)', defFlat:'DEF (+แบน)', mdefFlat:'MDEF (+แบน)', hpPercent:'HP (+%)', matkPercent:'MATK (+%)',
+    spPercent:'SP max (+%)', hpRegenFlat:'HP Regen/วิ (+แบน)', castReductionFlat:'ลด Cast (+%)',
+    doubleAttackChance:'Double Attack (+โอกาส)', passiveAutospellChance:'Autospell ติดตัว (+โอกาส)',
+    magicCritChanceFlat:'Magic Crit% (+แบน)', mdefIgnoreFlat:'MDEF Ignore ตอนคริ (+%)', critDamageBonusFlat:'Crit Dmg Bonus เวท (+%)',
+  };
+  const STAT_KEYS = ['str','agi','vit','int','dex','luk'];
+  const STAT_LABELS = {str:'STR', agi:'AGI', vit:'VIT', int:'INT', dex:'DEX', luk:'LUK'};
+
+  const LS_KEY = 'roStatusLabConfig_v1';
+  function cloneDeep(x){ return JSON.parse(JSON.stringify(x)); }
+  let CONFIG = cloneDeep(DEFAULT_CONFIG);
+
+  function loadConfig(){
+    try{
+      const raw = localStorage.getItem(LS_KEY);
+      if(raw){
+        const parsed = JSON.parse(raw);
+        if(parsed && typeof parsed==='object') CONFIG = parsed;
+      }
+    }catch(e){ /* ใช้ค่า default ต่อ ถ้าอ่านไม่ได้ */ }
+    migrateConfig();
+  }
+  // เติมคีย์ที่เพิ่มใหม่ภายหลัง (เช่น aspdCap) ให้ config เก่าที่เคยเซฟไว้ในเบราว์เซอร์ โดยไม่ทับค่าที่ผู้ใช้ปรับเอง
+  function mergeMissingKeys(target, defaults){
+    let changed = false;
+    Object.keys(defaults).forEach(k=>{
+      if(target[k]===undefined){
+        target[k] = (defaults[k] && typeof defaults[k]==='object' && !Array.isArray(defaults[k])) ? cloneDeep(defaults[k]) : defaults[k];
+        changed = true;
+      }
+    });
+    return changed;
+  }
+
+  // อัปเกรดค่าที่เคยเซฟไว้ก่อนมี Passive Tree / ASPD Cap ให้ทันชุดใหม่อัตโนมัติ
+  function migrateConfig(){
+    let changed = false;
+    if(!Array.isArray(CONFIG.passives) || CONFIG.passives.some(p=>p.tier===undefined || p.classId===undefined)){
+      CONFIG.passives = cloneDeep(DEFAULT_CONFIG.passives);
+      changed = true;
+    } else {
+      CONFIG.passives.forEach(p=>{
+        if(!p.requires) { p.requires = {passiveId:'', minLevel:0}; changed = true; }
+        if(!Array.isArray(p.effects)) { p.effects = []; changed = true; }
+      });
+    }
+    if(mergeMissingKeys(CONFIG.baseConstants, DEFAULT_CONFIG.baseConstants)) changed = true;
+    if(mergeMissingKeys(CONFIG.statusPointSystem, DEFAULT_CONFIG.statusPointSystem)) changed = true;
+    if(mergeMissingKeys(CONFIG.mitigation, DEFAULT_CONFIG.mitigation)) changed = true;
+    if(mergeMissingKeys(CONFIG.autospellGlobal, DEFAULT_CONFIG.autospellGlobal)) changed = true;
+    if(mergeMissingKeys(CONFIG.shieldProfile, DEFAULT_CONFIG.shieldProfile)) changed = true;
+    if(mergeMissingKeys(CONFIG.magicCrit.chance, DEFAULT_CONFIG.magicCrit.chance)) changed = true;
+    if(mergeMissingKeys(CONFIG.magicCrit.mdefIgnore, DEFAULT_CONFIG.magicCrit.mdefIgnore)) changed = true;
+    if(mergeMissingKeys(CONFIG.magicCrit.critDamageBonus, DEFAULT_CONFIG.magicCrit.critDamageBonus)) changed = true;
+    if(changed) saveConfig();
+  }
+  function saveConfig(){
+    try{ localStorage.setItem(LS_KEY, JSON.stringify(CONFIG)); }catch(e){ /* best-effort */ }
+  }
+
+  /* ========================================================================
+     1) STAT CURVE — diminishing returns ต่อ stat
+  ======================================================================== */
+  function applyCurve(raw, cfg){
+    const {breakpoints, slopes} = cfg;
+    let remaining = raw, prev = 0, total = 0;
+    for(let i=0;i<breakpoints.length;i++){
+      const seg = breakpoints[i]-prev;
+      if(remaining<=seg){ total += remaining*slopes[i]; return total; }
+      total += seg*slopes[i]; remaining -= seg; prev = breakpoints[i];
+    }
+    total += remaining*slopes[slopes.length-1];
+    return total;
+  }
+  function computeEffectiveStats(raw){
+    const eff = {};
+    for(const k of Object.keys(raw)) eff[k] = applyCurve(raw[k], CONFIG.statCurve[k]);
+    return eff;
+  }
+
+  /* ========================================================================
+     2) STATUS POINT SYSTEM
+  ======================================================================== */
+  function statusPointsForLevelUp(targetLevel){
+    const s = CONFIG.statusPointSystem;
+    return Math.floor((targetLevel+s.levelUpOffset)/s.levelUpDivisor);
+  }
+  function totalStatusPoints(level){
+    let total = CONFIG.statusPointSystem.startPoints;
+    for(let L=2; L<=level; L++) total += statusPointsForLevelUp(L);
+    return total;
+  }
+  function costForNextStatPoint(current){ return Math.floor(current/10)+1; }
+  function costToReach(value){
+    let sum = 0;
+    for(let v=1; v<value; v++) sum += costForNextStatPoint(v);
+    return sum;
+  }
+  function totalSpent(raw){
+    let s = 0;
+    for(const k of Object.keys(raw)) s += costToReach(raw[k]);
+    return s;
+  }
+
+  /* ========================================================================
+     3) PASSIVE EFFECTS — ประยุกต์แบบ data-driven ตาม effects[] ของแต่ละ passive
+  ======================================================================== */
+  function applyPassive(st, lvl, passive, weapon){
+    (passive.effects||[]).forEach(eff=>{
+      if(eff.weaponClassOnly && weapon.weaponClass!==eff.weaponClassOnly) return;
+      if(eff.excludeWeaponClass && weapon.weaponClass===eff.excludeWeaponClass) return;
+      if(st[eff.target]===undefined) return;
+      st[eff.target] += lvl*eff.perLevel;
+    });
+  }
+
+  /* ========================================================================
+     4) DERIVED STATS CALCULATION
+  ======================================================================== */
+  function getCharacterConfig(){
+    const raw = Object.assign({}, characterRaw);
+    const level = Number(document.getElementById('inLevel').value)||1;
+    const classId = document.getElementById('inClass').value;
+    const weaponId = document.getElementById('inWeapon').value;
+    const offhandId = document.getElementById('inOffhand').value;
+    const passiveLevels = {};
+    CONFIG.passives.forEach(p=>{
+      const el = document.getElementById('passive_'+p.id);
+      passiveLevels[p.id] = el ? Number(el.value)||0 : 0;
+    });
+    return {raw, level, classId, weaponId, offhandId, passiveLevels};
+  }
+
+  function computeDerived(cfg){
+    const C = CONFIG.baseConstants;
+    const eff = computeEffectiveStats(cfg.raw);
+    const klass = CONFIG.classes[cfg.classId] || Object.values(CONFIG.classes)[0];
+    const weapon = CONFIG.weapons[cfg.weaponId] || Object.values(CONFIG.weapons)[0];
+    const hasShield = cfg.offhandId==='shield' && weapon.slotType==='1H';
+
+    const st = {atkFlat:0, hitFlat:0, fleeFlat:0, critFlat:0, aspdFlat:0, defFlat:0, mdefFlat:0, hpPercent:0,
+      matkPercent:0, spPercent:0, hpRegenFlat:0, castReductionFlat:0, doubleAttackChance:0, passiveAutospellChance:0,
+      magicCritChanceFlat:0, mdefIgnoreFlat:0, critDamageBonusFlat:0};
+    CONFIG.passives.forEach(p=>{ applyPassive(st, cfg.passiveLevels[p.id]||0, p, weapon); });
+
+    let atk = eff[weapon.atk.stat]*weapon.atk.coeff;
+    if(weapon.atk.stat2) atk += (eff[weapon.atk.stat2]||0)*weapon.atk.coeff2;
+    atk += st.atkFlat;
+
+    let aspd = C.aspdBase + eff.agi*C.aspdPerAgi + eff.dex*C.aspdPerDex + weapon.aspdOffset + st.aspdFlat;
+    if(hasShield) aspd += CONFIG.shieldProfile.aspdOffset;
+    const aspdBeforeCap = aspd;
+    aspd = Math.min(aspd, C.aspdCap);
+    const aspdCapped = aspdBeforeCap > C.aspdCap;
+    // สูตรแปลง ASPD -> จำนวนครั้งตี/วินาที แบบ RO จริง: interval = (200-ASPD)*0.01 วินาที
+    // ที่ ASPD 193 (ตัน) จะได้ ~14.3 ครั้ง/วิ (ตียิกแทบไม่เห็นช่องว่าง) ไม่ใช่เส้นตรงแบบ aspd/100
+    const aspdForSpeed = Math.min(aspd, 199); // กันหารด้วย 0/ติดลบถ้ามีคนตั้ง aspdCap >= 200 ในหน้า backend
+    const atkPerSec = Math.max(0.1, 100/(200-aspdForSpeed));
+
+    let hit = C.hitBase + eff.dex*C.hitPerDex + st.hitFlat + (weapon.special.hitBonusFlat||0) - (weapon.special.hitPenalty||0);
+    let flee = C.fleeBase + eff.agi*C.fleePerAgi + eff.luk*C.fleePerLuk + st.fleeFlat;
+    let physCrit = C.critBase + eff.luk*C.critPerLuk + (weapon.special.critBonusFlat||0) + st.critFlat;
+
+    let matkPercent = 1 + st.matkPercent + (weapon.special.matkPercent||0);
+    const matk = eff.int*C.matkPerInt*matkPercent;
+    const sp = Math.round((eff.int*C.spPerInt + cfg.level*C.spPerLevel) * klass.spCoef * (1+st.spPercent));
+    const hp = Math.round((eff.vit*C.hpPerVit + cfg.level*C.hpPerLevel) * klass.hpCoef * (1+st.hpPercent));
+
+    let def = eff.vit*C.defPerVit + (hasShield?CONFIG.shieldProfile.defFlat:0);
+    const mdef = eff.int*C.mdefPerInt + st.mdefFlat;
+    const tensionPenalty = Math.min(0.25, Math.max(0,aspd-C.aspdBase)*0.002);
+    def = def*(1-tensionPenalty) + st.defFlat;
+
+    const hpRegen = eff.vit*C.hpRegenPerVit + st.hpRegenFlat;
+    const castReduction = Math.min(100, (eff.dex*C.castReductionPerDex + (weapon.special.castReductionBonus||0)*100 + st.castReductionFlat*100));
+
+    const mc = CONFIG.magicCrit;
+    const magicCritChance = mc.chance.base + eff.luk*C.critPerLuk*mc.chance.lukScalar + st.magicCritChanceFlat;
+    const mdefIgnore = Math.min(mc.mdefIgnore.cap, mc.mdefIgnore.base + eff.dex*mc.mdefIgnore.dexScalar + st.mdefIgnoreFlat);
+    const critDamageBonus = Math.min(mc.critDamageBonus.cap, mc.critDamageBonus.base + eff.int*mc.critDamageBonus.intScalar + st.critDamageBonusFlat);
+
+    return {
+      eff, klass, weapon, hasShield,
+      atk, matk, hp, sp, hit, flee, physCrit, aspd, atkPerSec, aspdCapped,
+      def, mdef, hpRegen, castReduction, tensionPenalty,
+      magicCritChance, mdefIgnore, critDamageBonus,
+      doubleAttackChance:st.doubleAttackChance, passiveAutospellChance:st.passiveAutospellChance,
+      blockChance: hasShield ? CONFIG.shieldProfile.blockChance : 0,
+      defPenetration: weapon.special.defPenetrationPercent||0,
+      damageType: weapon.damageType,
+    };
+  }
+
+  /* ========================================================================
+     5) MITIGATION (soft-defense + cap)
+  ======================================================================== */
+  function physicalMitigation(defValue, defPenetrationPercent, blockChance){
+    const m = CONFIG.mitigation;
+    const effDef = defValue*(1-defPenetrationPercent);
+    const defReduction = effDef/(effDef+m.softDefK);
+    const blockTriggered = Math.random() < blockChance;
+    const blockReduction = blockTriggered ? 0.3 : 0;
+    const total = 1-(1-defReduction)*(1-blockReduction);
+    return {reduction: Math.min(total, m.maxPhysicalReduction), blocked: blockTriggered};
+  }
+  function magicMitigation(mdefValue, mdefIgnore){
+    const m = CONFIG.mitigation;
+    const effMdef = mdefValue*(1-mdefIgnore);
+    const reduction = effMdef/(effMdef+m.softDefK);
+    return Math.min(reduction, m.maxMagicReduction);
+  }
+
+  /* ========================================================================
+     6) LIVE COMBAT ENGINE
+  ======================================================================== */
+  const combat = {
+    running:false, rafId:null, lastTs:0, needsSetup:true, monsterDown:false,
+    swingClock:0, nextSwingAt:0, lastAutospellAt:-999,
+    derived:null, monster:null, asCfg:null, combinedChance:0, icd:4,
+    totals:{total:0, physical:0, autospell:0, double:0, physHits:0, physCrits:0, procs:0, magicCrits:0, kills:0},
+    engagedTime:0, events:[],
+  };
+
+  function resetCombatStats(){
+    combat.totals = {total:0, physical:0, autospell:0, double:0, physHits:0, physCrits:0, procs:0, magicCrits:0, kills:0};
+    combat.engagedTime = 0; combat.events = []; combat.lastAutospellAt = -999;
+    combat.swingClock = 0; combat.nextSwingAt = 0;
+    const log = document.getElementById('eventLog');
+    if(log) log.innerHTML='';
+  }
+
+  function setupCombat(){
+    let derived = window.__derived;
+    if(document.getElementById('inMaxAspdTest').checked){
+      const cap = Math.min(CONFIG.baseConstants.aspdCap, 199);
+      derived = Object.assign({}, derived, {
+        aspd: CONFIG.baseConstants.aspdCap, aspdCapped: true,
+        atkPerSec: Math.max(0.1, 100/(200-cap)),
+      });
+    }
+    const monster = {
+      def: Number(document.getElementById('mDef').value)||0,
+      mdef: Number(document.getElementById('mMdef').value)||0,
+      flee: Number(document.getElementById('mFlee').value)||0,
+      maxHp: Number(document.getElementById('mHp').value)||1,
+    };
+    monster.hp = monster.maxHp;
+    const asCfg = {
+      on: document.getElementById('inAutospellOn').checked,
+      chance: Number(document.getElementById('inAsChance').value)/100,
+      mult: Number(document.getElementById('inAsMult').value),
+      icd: Number(document.getElementById('inAsIcd').value),
+    };
+    const itemChance = asCfg.on ? asCfg.chance*derived.weapon.autospellEfficiency : 0;
+    const passiveChance = derived.passiveAutospellChance*derived.weapon.autospellEfficiency;
+    combat.derived = derived; combat.monster = monster; combat.asCfg = asCfg;
+    combat.combinedChance = Math.min(itemChance+passiveChance, CONFIG.autospellGlobal.maxCombinedTriggerChance);
+    combat.icd = asCfg.on ? asCfg.icd : 4;
+    updateMonsterHpUI();
+  }
+
+  function spawnFloat(text, cls){
+    const host = document.getElementById('floaters');
+    if(!host) return;
+    const span = document.createElement('span');
+    span.className = 'floatnum '+cls;
+    span.textContent = text;
+    span.style.setProperty('--drift', (Math.random()*36-18).toFixed(0)+'px');
+    span.style.left = (46 + Math.random()*8).toFixed(0)+'%';
+    host.appendChild(span);
+    span.addEventListener('animationend', ()=>span.remove());
+    setTimeout(()=>{ if(span.isConnected) span.remove(); }, 1200);
+  }
+  function flashDummy(){
+    const d = document.getElementById('dummySprite');
+    d.classList.remove('hitflash'); void d.offsetWidth; d.classList.add('hitflash');
+  }
+  function updateMonsterHpUI(){
+    const m = combat.monster;
+    if(!m) return;
+    const pct = Math.max(0, m.hp/m.maxHp*100);
+    document.getElementById('monsterHpFill').style.width = pct+'%';
+    document.getElementById('monsterHpText').textContent = fmt(Math.max(0,Math.ceil(m.hp)))+' / '+fmt(m.maxHp);
+  }
+  function pushEvent(label, cls){
+    const log = document.getElementById('eventLog');
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `<span class="t">${combat.engagedTime.toFixed(1)}s</span><span class="ev ${cls}">${label}</span>`;
+    log.appendChild(row);
+    while(log.children.length>80) log.removeChild(log.firstChild);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function doSwing(){
+    const {derived, monster} = combat;
+    const t = combat.totals;
+    const hitChance = Math.min(0.95, Math.max(0.05, 0.5 + (derived.hit - monster.flee)*0.01));
+    const didHit = Math.random() < hitChance;
+
+    if(didHit){
+      t.physHits++;
+      const isCrit = Math.random()*100 < derived.physCrit;
+      let dmg;
+      if(isCrit){ t.physCrits++; dmg = derived.atk*1.5; }
+      else { const mit = physicalMitigation(monster.def, derived.defPenetration, derived.blockChance); dmg = derived.atk*(1-mit.reduction); }
+      dmg = Math.max(1, Math.round(dmg));
+      t.physical += dmg; t.total += dmg; monster.hp -= dmg;
+      flashDummy();
+      spawnFloat((isCrit?'ติดคริ! ':'')+'-'+fmt(dmg), isCrit?'crit':'');
+      pushEvent((isCrit?'ติดคริ! ดาเมจกายภาพ — ':'โจมตีกายภาพ — ')+fmt(dmg), isCrit?'crit':'');
+      checkDeath();
+
+      if(!combat.monsterDown && Math.random() < derived.doubleAttackChance){
+        const mit2 = physicalMitigation(monster.def, derived.defPenetration, derived.blockChance);
+        const dmg2 = Math.max(1, Math.round(derived.atk*(1-mit2.reduction)));
+        t.double += dmg2; t.total += dmg2; monster.hp -= dmg2;
+        spawnFloat('-'+fmt(dmg2), '');
+        pushEvent('Double Attack — '+fmt(dmg2), '');
+        checkDeath();
+      }
+    } else {
+      spawnFloat('MISS', 'miss');
+      pushEvent('พลาด', 'miss');
+    }
+
+    if(!combat.monsterDown && combat.combinedChance>0 && (combat.swingClock-combat.lastAutospellAt)>=combat.icd && Math.random()<combat.combinedChance){
+      combat.lastAutospellAt = combat.swingClock;
+      t.procs++;
+      const baseSpell = derived.matk*combat.asCfg.mult;
+      const isMCrit = Math.random()*100 < derived.magicCritChance;
+      const mit = magicMitigation(monster.mdef, isMCrit?derived.mdefIgnore:0);
+      let dmg = baseSpell*(1-mit);
+      if(isMCrit){ t.magicCrits++; dmg *= (1+derived.critDamageBonus); }
+      dmg = Math.max(1, Math.round(dmg));
+      t.autospell += dmg; t.total += dmg; monster.hp -= dmg;
+      spawnFloat((isMCrit?'เวทคริ! ':'เวท ')+'-'+fmt(dmg), isMCrit?'magiccrit':'magic');
+      pushEvent((isMCrit?'Autospell ติดคริเวท! — ':'Autospell ทริกเกอร์ — ')+fmt(dmg), isMCrit?'crit magic':'magic');
+      checkDeath();
+    }
+    updateMonsterHpUI();
+    updateResultTiles();
+  }
+
+  function checkDeath(){
+    if(combat.monster.hp<=0 && !combat.monsterDown){
+      combat.monsterDown = true;
+      combat.totals.kills++;
+      document.getElementById('dummySprite').classList.add('down');
+      spawnFloat('ล้ม!', 'ko');
+      pushEvent('ม้อนสเตอร์ล้ม — กำลังฟื้นคืนชีพ', '');
+      setTimeout(()=>{
+        if(!combat.running) return;
+        combat.monster.hp = combat.monster.maxHp;
+        combat.monsterDown = false;
+        document.getElementById('dummySprite').classList.remove('down');
+        updateMonsterHpUI();
+      }, 1200);
+    }
+  }
+
+  function updateResultTiles(){
+    const t = combat.totals;
+    document.getElementById('rTotal').textContent = fmt(t.total);
+    document.getElementById('rDps').textContent = fmt(combat.engagedTime>0 ? t.total/combat.engagedTime : 0, 1);
+    document.getElementById('rKills').textContent = fmt(t.kills);
+    document.getElementById('rPCrit').textContent = fmt(t.physHits? t.physCrits/t.physHits*100 : 0, 1)+'%';
+    document.getElementById('rProcs').textContent = fmt(t.procs);
+    document.getElementById('rMCrit').textContent = fmt(t.procs? t.magicCrits/t.procs*100 : 0, 1)+'%';
+    const total = Math.max(1, t.total);
+    const segs = [ {v:t.physical, color:'var(--accent)'}, {v:t.autospell, color:'var(--accent-2)'}, {v:t.double, color:'var(--fg-dim)'} ];
+    document.getElementById('dmgBar').innerHTML = segs.map(s=>
+      `<div class="bar-seg" style="width:${(s.v/total*100).toFixed(2)}%; background:${s.color};"></div>`).join('');
+  }
+
+  function combatLoop(ts){
+    if(!combat.running) return;
+    if(!combat.lastTs) combat.lastTs = ts;
+    const dt = Math.min(0.25, (ts-combat.lastTs)/1000);
+    combat.lastTs = ts;
+    combat.engagedTime += dt;
+    combat.swingClock += dt;
+    const interval = 1/combat.derived.atkPerSec;
+    while(combat.swingClock >= combat.nextSwingAt){ doSwing(); combat.nextSwingAt += interval; }
+    combat.rafId = requestAnimationFrame(combatLoop);
+  }
+
+  function startCombat(){
+    if(combat.needsSetup || !combat.derived){ setupCombat(); combat.monsterDown = false; combat.needsSetup = false; }
+    combat.running = true; combat.lastTs = 0;
+    document.getElementById('stageMsg').hidden = true;
+    document.getElementById('btnToggleCombat').textContent = '⏸ หยุด';
+    combat.rafId = requestAnimationFrame(combatLoop);
+  }
+  function stopCombat(){
+    combat.running = false;
+    if(combat.rafId) cancelAnimationFrame(combat.rafId);
+    document.getElementById('btnToggleCombat').textContent = '▶ เริ่มต่อสู้';
+  }
+  function toggleCombat(){ if(combat.running) stopCombat(); else startCombat(); }
+
+  /* ========================================================================
+     7) LAB UI — stat points / selects / passives / render
+  ======================================================================== */
+  const DEFAULT_RAW = {str:40, agi:40, vit:30, int:30, dex:40, luk:20};
+  let characterRaw = {str:1, agi:1, vit:1, int:1, dex:1, luk:1};
+
+  function pickInitialLevel(raw){
+    const need = totalSpent(raw);
+    for(let L=1; L<=99; L++){ if(totalStatusPoints(L) >= need) return L; }
+    return 99;
+  }
+
+  function buildStatInputs(){
+    const grid = document.getElementById('statGrid');
+    grid.innerHTML='';
+    STAT_KEYS.forEach(k=>{
+      const row = document.createElement('div');
+      row.className='stat-row';
+      row.innerHTML = `
+        <span class="name">${STAT_LABELS[k]}</span>
+        <div class="valwrap">
+          <span class="raw num" data-rawfor="${k}">1</span>
+          <span class="eff num" data-efffor="${k}">eff —</span>
+        </div>
+        <span class="cost num" data-costfor="${k}">+1pt</span>
+        <button class="statbtn secondary" type="button" data-minus="${k}">−</button>
+        <button class="statbtn" type="button" data-plus="${k}">+</button>`;
+      grid.appendChild(row);
+    });
+    // กดค้างแล้วอัพ/ลดไวขึ้น — ใช้ Pointer Events ครอบทั้งเมาส์และทัช รองรับการเร่งความเร็วเมื่อกดค้างนาน
+    const hold = {timerId:null};
+    function stopHold(){ if(hold.timerId){ clearTimeout(hold.timerId); hold.timerId=null; } }
+    function startHold(stat, dir, btn){
+      stopHold();
+      const step = ()=>{ if(btn && btn.disabled){ stopHold(); return false; } adjustStat(stat, dir); return true; };
+      if(!step()) return;
+      let count = 0;
+      hold.timerId = setTimeout(function repeat(){
+        if(!step()) return;
+        count++;
+        const interval = count>10 ? 40 : (count>4 ? 90 : 160);
+        hold.timerId = setTimeout(repeat, interval);
+      }, 380);
+    }
+    grid.addEventListener('pointerdown', (e)=>{
+      const plus = e.target.closest('[data-plus]');
+      const minus = e.target.closest('[data-minus]');
+      if(!plus && !minus) return;
+      e.preventDefault();
+      if(plus) startHold(plus.dataset.plus, 1, plus);
+      else startHold(minus.dataset.minus, -1, minus);
+    });
+    ['pointerup','pointerleave','pointercancel'].forEach(evt=> grid.addEventListener(evt, stopHold));
+    document.addEventListener('pointerup', stopHold);
+    document.addEventListener('pointercancel', stopHold);
+  }
+
+  function adjustStat(stat, dir){
+    const level = Number(document.getElementById('inLevel').value)||1;
+    const pool = totalStatusPoints(level) - totalSpent(characterRaw);
+    const cap = CONFIG.statusPointSystem.statCap;
+    if(dir>0){
+      if(characterRaw[stat] >= cap) return;
+      const cost = costForNextStatPoint(characterRaw[stat]);
+      if(pool < cost) return;
+      characterRaw[stat] += 1;
+    } else {
+      if(characterRaw[stat] <= 1) return;
+      characterRaw[stat] -= 1;
+    }
+    render();
+  }
+
+  function buildClassSelect(){
+    const sel = document.getElementById('inClass');
+    const prev = sel.value;
+    sel.innerHTML='';
+    Object.entries(CONFIG.classes).forEach(([id,c])=>{
+      const o=document.createElement('option'); o.value=id; o.textContent=c.name;
+      sel.appendChild(o);
+    });
+    const ids = Object.keys(CONFIG.classes);
+    sel.value = CONFIG.classes[prev] ? prev : (ids.includes('swordman') ? 'swordman' : ids[0]);
+  }
+
+  function buildWeaponSelect(){
+    const sel = document.getElementById('inWeapon');
+    const prev = sel.value;
+    sel.innerHTML='';
+    Object.entries(CONFIG.weapons).forEach(([id,w])=>{
+      const o=document.createElement('option'); o.value=id; o.textContent=w.name;
+      sel.appendChild(o);
+    });
+    const ids = Object.keys(CONFIG.weapons);
+    sel.value = CONFIG.weapons[prev] ? prev : (ids.includes('sword_1h') ? 'sword_1h' : ids[0]);
+
+    const off = document.getElementById('inOffhand');
+    if(!off.dataset.built){ off.innerHTML = `<option value="none">ว่าง</option><option value="shield">โล่</option>`; off.dataset.built='1'; }
+  }
+
+  function visiblePassivesFor(classId){
+    return CONFIG.passives
+      .filter(p=> p.classId==='any' || p.classId===classId)
+      .slice()
+      .sort((a,b)=> (a.tier-b.tier) || a.name.localeCompare(b.name));
+  }
+
+  function buildPassives(){
+    const wrap = document.getElementById('passiveList');
+    const prevLevels = {};
+    wrap.querySelectorAll('input[type=range]').forEach(inp=>{ prevLevels[inp.id.replace('passive_','')] = inp.value; });
+    wrap.innerHTML='';
+    const classId = document.getElementById('inClass').value;
+    const list = visiblePassivesFor(classId);
+    let lastTier = null;
+    list.forEach(p=>{
+      if(p.tier !== lastTier){
+        lastTier = p.tier;
+        const head = document.createElement('div');
+        head.className='tier-head';
+        head.textContent = 'Tier '+p.tier + (p.classId==='any' ? ' • ทุกคลาส' : '');
+        wrap.appendChild(head);
+      }
+      const div = document.createElement('div');
+      div.className='passive';
+      div.dataset.pid = p.id;
+      div.innerHTML = `
+        <div class="head"><b>${p.name}</b><output id="out_${p.id}">0</output></div>
+        <div class="desc">${p.desc}</div>
+        <div class="levelrow"><input type="range" id="passive_${p.id}" min="0" max="${p.maxLevel}" value="0"></div>
+        <div class="locknote" id="lock_${p.id}" hidden></div>`;
+      wrap.appendChild(div);
+      const input = div.querySelector('input[type=range]');
+      if(prevLevels[p.id]!==undefined) input.value = Math.min(Number(prevLevels[p.id]), p.maxLevel);
+    });
+    updatePassiveLocks(list);
+  }
+
+  function updatePassiveLocks(list){
+    (list || visiblePassivesFor(document.getElementById('inClass').value)).forEach(p=>{
+      const inp = document.getElementById('passive_'+p.id);
+      if(!inp) return;
+      const req = p.requires;
+      let locked = false, reqLabel = '';
+      if(req && req.passiveId){
+        const reqInput = document.getElementById('passive_'+req.passiveId);
+        const reqLevel = reqInput ? Number(reqInput.value)||0 : 0;
+        const reqP = CONFIG.passives.find(x=>x.id===req.passiveId);
+        const needLevel = req.minLevel||1;
+        locked = reqLevel < needLevel;
+        if(locked) reqLabel = 'ต้องการ: '+(reqP?reqP.name:req.passiveId)+' เลเวล '+needLevel;
+      }
+      inp.disabled = locked;
+      if(locked && Number(inp.value)>0) inp.value = 0;
+      const wrapDiv = document.querySelector('.passive[data-pid="'+p.id+'"]');
+      if(wrapDiv) wrapDiv.classList.toggle('locked', locked);
+      const lockNote = document.getElementById('lock_'+p.id);
+      if(lockNote){ lockNote.hidden = !locked; lockNote.textContent = reqLabel; }
+    });
+  }
+
+  function fmt(n, d=0){ return Number(n).toLocaleString('en-US', {maximumFractionDigits:d, minimumFractionDigits:d}); }
+
+  function render(){
+    updatePassiveLocks(visiblePassivesFor(document.getElementById('inClass').value));
+    const cfg = getCharacterConfig();
+    const weapon = CONFIG.weapons[cfg.weaponId];
+    if(!weapon) return;
+
+    const offSel = document.getElementById('inOffhand');
+    if(weapon.slotType==='2H'){ offSel.value='none'; offSel.disabled=true; } else { offSel.disabled=false; }
+
+    document.getElementById('classNote').textContent = (CONFIG.classes[cfg.classId]||{}).desc || '';
+    document.getElementById('weaponNote').textContent =
+      `${weapon.name} • ${weapon.slotType} • Damage Type: ${weapon.damageType}` +
+      (weapon.affinity.length? ` • เข้าทาง: ${weapon.affinity.map(a=>(CONFIG.classes[a]||{name:a}).name).join(', ')}` : '') +
+      (weapon.autospellEfficiency<1 ? ` • autospell efficiency ${Math.round(weapon.autospellEfficiency*100)}%` : '');
+
+    CONFIG.passives.forEach(p=>{
+      const out = document.getElementById('out_'+p.id);
+      const inp = document.getElementById('passive_'+p.id);
+      if(out && inp) out.textContent = inp.value;
+    });
+
+    const eff = computeEffectiveStats(cfg.raw);
+    const pool = totalStatusPoints(cfg.level) - totalSpent(characterRaw);
+    const poolEl = document.getElementById('pointsLeft');
+    poolEl.textContent = fmt(pool);
+    poolEl.classList.toggle('deficit', pool<0);
+
+    const cap = CONFIG.statusPointSystem.statCap;
+    STAT_KEYS.forEach(k=>{
+      document.querySelector(`[data-efffor="${k}"]`).textContent = 'eff '+fmt(eff[k],1);
+      document.querySelector(`[data-rawfor="${k}"]`).textContent = characterRaw[k];
+      const atCap = characterRaw[k] >= cap;
+      const nextCost = atCap ? null : costForNextStatPoint(characterRaw[k]);
+      document.querySelector(`[data-costfor="${k}"]`).textContent = atCap ? 'MAX' : ('+'+nextCost+'pt');
+      document.querySelector(`[data-plus="${k}"]`).disabled = atCap || pool < nextCost;
+      document.querySelector(`[data-minus="${k}"]`).disabled = characterRaw[k] <= 1;
+    });
+
+    const derived = computeDerived(cfg);
+    window.__derived = derived;
+
+    const grid = document.getElementById('derivedGrid');
+    const tiles = [
+      ['ATK', fmt(derived.atk)], ['MATK', fmt(derived.matk)], ['HP', fmt(derived.hp)], ['SP', fmt(derived.sp)],
+      ['HIT', fmt(derived.hit)], ['FLEE', fmt(derived.flee)],
+      ['ASPD', fmt(derived.aspd,1) + (derived.aspdCapped ? ' (ตัน)' : '')], ['ตี/วิ', fmt(derived.atkPerSec,2)],
+      ['Phys Crit', fmt(derived.physCrit,2)+'%'], ['Magic Crit', fmt(derived.magicCritChance,2)+'%'],
+      ['DEF', fmt(derived.def,1)], ['MDEF', fmt(derived.mdef,1)],
+      ['MDEF Ignore(crit)', fmt(derived.mdefIgnore*100,1)+'%'], ['Crit Dmg Bonus', '+'+fmt(derived.critDamageBonus*100,1)+'%'],
+      ['Cast ลดลง', fmt(derived.castReduction,1)+'%'], ['HP Regen/วิ', fmt(derived.hpRegen,2)],
+    ];
+    grid.innerHTML = tiles.map(([l,v])=>`<div class="tile"><div class="label">${l}</div><div class="value">${v}</div></div>`).join('');
+
+    const capLabel = document.getElementById('aspdCapLabel');
+    if(capLabel) capLabel.textContent = CONFIG.baseConstants.aspdCap;
+
+    combat.needsSetup = true;
+    if(combat.running){
+      stopCombat();
+      document.getElementById('stageMsg').hidden = false;
+      document.getElementById('stageMsg').textContent = 'หยุดเพราะปรับ build/สูตร — กด "เริ่มต่อสู้" ใหม่ได้เลย';
+    }
+  }
+
+  function syncLabFromConfig(){
+    buildClassSelect();
+    buildWeaponSelect();
+    buildPassives();
+    render();
+  }
+
+  /* ========================================================================
+     8) FORMULAS (BACKEND) VIEW — categorized editors
+  ======================================================================== */
+  function numField(label, value, onInput, step){
+    const wrap = document.createElement('label');
+    wrap.className = 'field';
+    wrap.innerHTML = `<b>${label}</b>`;
+    const input = document.createElement('input');
+    input.type='number'; input.step = step||'any'; input.value = value;
+    input.addEventListener('input', ()=>{ onInput(Number(input.value)||0); });
+    wrap.appendChild(input);
+    return wrap;
+  }
+
+  function renderFlatCategory(containerId, obj, afterChange){
+    const el = document.getElementById(containerId);
+    el.innerHTML='';
+    Object.keys(obj).forEach(key=>{
+      el.appendChild(numField(key, obj[key], (v)=>{ obj[key]=v; saveConfig(); afterChange&&afterChange(); }));
+    });
+  }
+
+  function renderFormula_statusPointSystem(){ renderFlatCategory('cat-statusPointSystem', CONFIG.statusPointSystem, syncLabFromConfig); }
+  function renderFormula_baseConstants(){ renderFlatCategory('cat-baseConstants', CONFIG.baseConstants, syncLabFromConfig); }
+  function renderFormula_mitigation(){ renderFlatCategory('cat-mitigation', CONFIG.mitigation, syncLabFromConfig); }
+  function renderFormula_autospellGlobal(){ renderFlatCategory('cat-autospellGlobal', CONFIG.autospellGlobal, syncLabFromConfig); }
+
+  function renderFormula_statCurve(){
+    const host = document.getElementById('cat-statCurve');
+    host.innerHTML='';
+    STAT_KEYS.forEach(k=>{
+      const cfg = CONFIG.statCurve[k];
+      const card = document.createElement('div');
+      card.className='card';
+      card.innerHTML = `<div class="cardhead"><b>${STAT_LABELS[k]}</b></div>`;
+      const grid = document.createElement('div');
+      grid.className='subgrid';
+      grid.appendChild(numField('breakpoint 1', cfg.breakpoints[0], v=>{ cfg.breakpoints[0]=v; saveConfig(); syncLabFromConfig(); }));
+      grid.appendChild(numField('breakpoint 2', cfg.breakpoints[1], v=>{ cfg.breakpoints[1]=v; saveConfig(); syncLabFromConfig(); }));
+      grid.appendChild(numField('slope 1', cfg.slopes[0], v=>{ cfg.slopes[0]=v; saveConfig(); syncLabFromConfig(); }, '0.01'));
+      grid.appendChild(numField('slope 2', cfg.slopes[1], v=>{ cfg.slopes[1]=v; saveConfig(); syncLabFromConfig(); }, '0.01'));
+      grid.appendChild(numField('slope 3', cfg.slopes[2], v=>{ cfg.slopes[2]=v; saveConfig(); syncLabFromConfig(); }, '0.01'));
+      card.appendChild(grid);
+      host.appendChild(card);
+    });
+  }
+
+  function renderFormula_magicCrit(){
+    const host = document.getElementById('cat-magicCrit');
+    host.innerHTML='';
+    const groups = [
+      ['ความถี่ (LUK)', CONFIG.magicCrit.chance],
+      ['MDEF Ignore ตอนคริ (DEX)', CONFIG.magicCrit.mdefIgnore],
+      ['Crit Damage Bonus (INT)', CONFIG.magicCrit.critDamageBonus],
+    ];
+    groups.forEach(([label, obj])=>{
+      const card = document.createElement('div');
+      card.className='card';
+      card.innerHTML = `<div class="cardhead"><b>${label}</b></div>`;
+      const grid = document.createElement('div');
+      grid.className='subgrid';
+      Object.keys(obj).forEach(key=>{
+        grid.appendChild(numField(key, obj[key], v=>{ obj[key]=v; saveConfig(); syncLabFromConfig(); }, '0.001'));
+      });
+      card.appendChild(grid);
+      host.appendChild(card);
+    });
+  }
+
+  function renderFormula_classes(){
+    const host = document.getElementById('cat-classes');
+    host.innerHTML='';
+    Object.entries(CONFIG.classes).forEach(([id,c])=>{
+      const card = document.createElement('div');
+      card.className='card';
+      card.innerHTML = `
+        <div class="cardhead">
+          <span class="cardid">id: ${id}</span>
+          <span class="cardbudget" data-budget="${id}">budget ${(c.hpCoef+c.spCoef).toFixed(2)}</span>
+          <button class="iconbtn" type="button" data-delclass="${id}" title="ลบคลาสนี้">✕</button>
+        </div>
+        <div class="subgrid">
+          <label class="field"><b>ชื่อที่แสดง</b><input type="text" data-cfield="name" value="${c.name}"></label>
+          <label class="field"><b>hpCoef</b><input type="number" step="0.01" data-cfield="hpCoef" value="${c.hpCoef}"></label>
+          <label class="field"><b>spCoef</b><input type="number" step="0.01" data-cfield="spCoef" value="${c.spCoef}"></label>
+        </div>
+        <label class="field"><b>คำอธิบาย</b><input type="text" data-cfield="desc" value="${c.desc||''}"></label>`;
+      host.appendChild(card);
+
+      card.querySelectorAll('[data-cfield]').forEach(input=>{
+        input.addEventListener('input', ()=>{
+          const field = input.dataset.cfield;
+          c[field] = (field==='hpCoef'||field==='spCoef') ? Number(input.value)||0 : input.value;
+          card.querySelector('[data-budget]').textContent = 'budget '+(c.hpCoef+c.spCoef).toFixed(2);
+          saveConfig(); syncLabFromConfig();
+        });
+      });
+      card.querySelector('[data-delclass]').addEventListener('click', ()=>{
+        if(Object.keys(CONFIG.classes).length<=1) return;
+        delete CONFIG.classes[id];
+        saveConfig(); renderFormula_classes(); syncLabFromConfig();
+      });
+    });
+  }
+
+  function weaponClassList(){ return [...new Set(Object.values(CONFIG.weapons).map(w=>w.weaponClass))]; }
+
+  function selectField(label, value, options, onChange){
+    const wrap = document.createElement('label');
+    wrap.className='field';
+    wrap.innerHTML = `<b>${label}</b>`;
+    const sel = document.createElement('select');
+    options.forEach(([val,text])=>{
+      const o=document.createElement('option'); o.value=val; o.textContent=text;
+      if(val===value) o.selected=true;
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', ()=>onChange(sel.value));
+    wrap.appendChild(sel);
+    return wrap;
+  }
+
+  function renderFormula_shield(){
+    const host = document.getElementById('cat-shield');
+    host.innerHTML='';
+    const s = CONFIG.shieldProfile;
+    const grid = document.createElement('div');
+    grid.className='subgrid';
+    grid.appendChild(numField('aspdOffset', s.aspdOffset, v=>{ s.aspdOffset=v; saveConfig(); syncLabFromConfig(); }));
+    grid.appendChild(numField('blockChance', s.blockChance, v=>{ s.blockChance=v; saveConfig(); syncLabFromConfig(); }, '0.01'));
+    grid.appendChild(numField('defFlat', s.defFlat, v=>{ s.defFlat=v; saveConfig(); syncLabFromConfig(); }));
+    host.appendChild(grid);
+  }
+
+  function renderFormula_weapons(){
+    const host = document.getElementById('cat-weapons');
+    host.innerHTML='';
+    const statOptions = [['','ไม่ใช้']].concat(STAT_KEYS.map(k=>[k,STAT_LABELS[k]]));
+
+    Object.entries(CONFIG.weapons).forEach(([id,w])=>{
+      const card = document.createElement('div');
+      card.className='card';
+      card.innerHTML = `
+        <div class="cardhead">
+          <span class="cardid">id: ${id} • weaponClass: <input type="text" data-wfield="weaponClass" value="${w.weaponClass}" style="display:inline-block; width:90px; padding:3px 5px; font-size:11px;"></span>
+          <button class="iconbtn" type="button" data-delweapon="${id}" title="ลบอาวุธนี้">✕</button>
+        </div>
+        <label class="field"><b>ชื่อที่แสดง</b><input type="text" data-wfield="name" value="${w.name}"></label>`;
+
+      const grid1 = document.createElement('div'); grid1.className='subgrid';
+      grid1.appendChild(selectField('slotType', w.slotType, [['1H','1H'],['2H','2H']], v=>{ w.slotType=v; saveConfig(); syncLabFromConfig(); }));
+      grid1.appendChild(selectField('damageType', w.damageType, [['slash','slash'],['pierce','pierce'],['blunt','blunt'],['magic','magic']], v=>{ w.damageType=v; saveConfig(); syncLabFromConfig(); }));
+      grid1.appendChild(numField('aspdOffset', w.aspdOffset, v=>{ w.aspdOffset=v; saveConfig(); syncLabFromConfig(); }));
+      grid1.appendChild(numField('autospellEfficiency', w.autospellEfficiency, v=>{ w.autospellEfficiency=v; saveConfig(); syncLabFromConfig(); }, '0.05'));
+      card.appendChild(grid1);
+
+      const subhead1 = document.createElement('div'); subhead1.className='subhead'; subhead1.textContent='สูตร ATK';
+      card.appendChild(subhead1);
+      const grid2 = document.createElement('div'); grid2.className='subgrid';
+      grid2.appendChild(selectField('stat หลัก', w.atk.stat, STAT_KEYS.map(k=>[k,STAT_LABELS[k]]), v=>{ w.atk.stat=v; saveConfig(); syncLabFromConfig(); }));
+      grid2.appendChild(numField('coeff หลัก', w.atk.coeff, v=>{ w.atk.coeff=v; saveConfig(); syncLabFromConfig(); }, '0.05'));
+      grid2.appendChild(selectField('stat รอง', w.atk.stat2||'', statOptions, v=>{ w.atk.stat2=v; saveConfig(); syncLabFromConfig(); }));
+      grid2.appendChild(numField('coeff รอง', w.atk.coeff2||0, v=>{ w.atk.coeff2=v; saveConfig(); syncLabFromConfig(); }, '0.05'));
+      card.appendChild(grid2);
+
+      const subhead2 = document.createElement('div'); subhead2.className='subhead'; subhead2.textContent='Special Effects';
+      card.appendChild(subhead2);
+      const grid3 = document.createElement('div'); grid3.className='subgrid';
+      ['critBonusFlat','hitBonusFlat','hitPenalty','defPenetrationPercent','hpRegenOnHitPercent','matkPercent','castReductionBonus'].forEach(key=>{
+        grid3.appendChild(numField(key, w.special[key]||0, v=>{ w.special[key]=v; saveConfig(); syncLabFromConfig(); }, '0.01'));
+      });
+      card.appendChild(grid3);
+
+      const subhead3 = document.createElement('div'); subhead3.className='subhead'; subhead3.textContent='เข้าทางคลาส (affinity)';
+      card.appendChild(subhead3);
+      const chipset = document.createElement('div'); chipset.className='chipset';
+      Object.entries(CONFIG.classes).forEach(([cid,c])=>{
+        const chip = document.createElement('label'); chip.className='chk-chip';
+        chip.innerHTML = `<input type="checkbox" ${w.affinity.includes(cid)?'checked':''}> ${c.name}`;
+        chip.querySelector('input').addEventListener('change', (e)=>{
+          if(e.target.checked){ if(!w.affinity.includes(cid)) w.affinity.push(cid); }
+          else { w.affinity = w.affinity.filter(x=>x!==cid); }
+          saveConfig(); syncLabFromConfig();
+        });
+        chipset.appendChild(chip);
+      });
+      card.appendChild(chipset);
+
+      host.appendChild(card);
+
+      card.querySelectorAll('[data-wfield]').forEach(input=>{
+        input.addEventListener('input', ()=>{ w[input.dataset.wfield] = input.value; saveConfig(); syncLabFromConfig(); });
+      });
+      card.querySelector('[data-delweapon]').addEventListener('click', ()=>{
+        if(Object.keys(CONFIG.weapons).length<=1) return;
+        delete CONFIG.weapons[id];
+        saveConfig(); renderFormula_weapons(); syncLabFromConfig();
+      });
+    });
+  }
+
+  function renderFormula_passives(){
+    const host = document.getElementById('cat-passives');
+    host.innerHTML='';
+    CONFIG.passives.forEach((p, pIdx)=>{
+      const card = document.createElement('div');
+      card.className='card';
+      card.innerHTML = `
+        <div class="cardhead">
+          <span class="cardid">id: ${p.id}</span>
+          <button class="iconbtn" type="button" data-delpassive="${pIdx}" title="ลบ Passive นี้">✕</button>
+        </div>
+        <label class="field"><b>ชื่อที่แสดง</b><input type="text" data-pfield="name" value="${p.name}"></label>
+        <div class="subgrid" data-classtier></div>
+        <div class="subgrid" data-requires></div>
+        <div class="subgrid">
+          <label class="field"><b>Max Level</b><input type="number" min="1" max="20" data-pfield="maxLevel" value="${p.maxLevel}"></label>
+        </div>
+        <label class="field"><b>คำอธิบาย</b><input type="text" data-pfield="desc" value="${p.desc||''}"></label>
+        <div class="subhead">Effects</div>
+        <div data-effectlist></div>
+        <button class="secondary" type="button" data-addeffect style="align-self:flex-start;">+ เพิ่ม effect</button>`;
+      host.appendChild(card);
+
+      const classTierGrid = card.querySelector('[data-classtier]');
+      classTierGrid.appendChild(selectField('อยู่ในคลาส', p.classId||'any',
+        [['any','ทุกคลาส (Universal)']].concat(Object.entries(CONFIG.classes).map(([cid,c])=>[cid,c.name])),
+        v=>{ p.classId=v; saveConfig(); syncLabFromConfig(); }));
+      classTierGrid.appendChild(numField('Tier (ชั้น)', p.tier||1, v=>{ p.tier=Math.max(1,Math.round(v)); saveConfig(); syncLabFromConfig(); }, '1'));
+
+      const requiresGrid = card.querySelector('[data-requires]');
+      if(!p.requires) p.requires = {passiveId:'', minLevel:0};
+      const reqOptions = [['','(ไม่มีเงื่อนไข — ปลดล็อกทันที)']].concat(
+        CONFIG.passives.filter(x=>x.id!==p.id).map(x=>[x.id, x.name]));
+      requiresGrid.appendChild(selectField('ต้องปลดล็อก Passive', p.requires.passiveId||'', reqOptions,
+        v=>{ p.requires.passiveId=v; saveConfig(); syncLabFromConfig(); }));
+      requiresGrid.appendChild(numField('เลเวลขั้นต่ำของเงื่อนไข', p.requires.minLevel||0,
+        v=>{ p.requires.minLevel=Math.max(0,Math.round(v)); saveConfig(); syncLabFromConfig(); }, '1'));
+
+      const effectList = card.querySelector('[data-effectlist]');
+      function renderEffects(){
+        effectList.innerHTML='';
+        const wcOptions = [['','ไม่จำกัด']].concat(weaponClassList().map(w=>[w,w]));
+        p.effects.forEach((eff, eIdx)=>{
+          const row = document.createElement('div');
+          row.className='effect-row';
+          row.innerHTML = `
+            <select data-efield="target"></select>
+            <input type="number" step="0.01" data-efield="perLevel" value="${eff.perLevel}">
+            <select data-efield="weaponClassOnly"></select>
+            <select data-efield="excludeWeaponClass"></select>
+            <button class="iconbtn" type="button" data-removeeffect>✕</button>`;
+          const targetSel = row.querySelector('[data-efield="target"]');
+          PASSIVE_TARGETS.forEach(t=>{ const o=document.createElement('option'); o.value=t; o.textContent=TARGET_LABELS[t]||t; if(t===eff.target) o.selected=true; targetSel.appendChild(o); });
+          const wOnlySel = row.querySelector('[data-efield="weaponClassOnly"]');
+          wcOptions.forEach(([v,t])=>{ const o=document.createElement('option'); o.value=v; o.textContent='เฉพาะ: '+t; if(v===(eff.weaponClassOnly||'')) o.selected=true; wOnlySel.appendChild(o); });
+          const wExSel = row.querySelector('[data-efield="excludeWeaponClass"]');
+          wcOptions.forEach(([v,t])=>{ const o=document.createElement('option'); o.value=v; o.textContent='ยกเว้น: '+t; if(v===(eff.excludeWeaponClass||'')) o.selected=true; wExSel.appendChild(o); });
+
+          row.querySelector('[data-efield="target"]').addEventListener('change', e=>{ eff.target=e.target.value; saveConfig(); syncLabFromConfig(); });
+          row.querySelector('[data-efield="perLevel"]').addEventListener('input', e=>{ eff.perLevel=Number(e.target.value)||0; saveConfig(); syncLabFromConfig(); });
+          row.querySelector('[data-efield="weaponClassOnly"]').addEventListener('change', e=>{ eff.weaponClassOnly=e.target.value; saveConfig(); syncLabFromConfig(); });
+          row.querySelector('[data-efield="excludeWeaponClass"]').addEventListener('change', e=>{ eff.excludeWeaponClass=e.target.value; saveConfig(); syncLabFromConfig(); });
+          row.querySelector('[data-removeeffect]').addEventListener('click', ()=>{
+            p.effects.splice(eIdx,1); saveConfig(); renderEffects(); syncLabFromConfig();
+          });
+          effectList.appendChild(row);
+        });
+      }
+      renderEffects();
+
+      card.querySelector('[data-addeffect]').addEventListener('click', ()=>{
+        p.effects.push({target:PASSIVE_TARGETS[0], perLevel:1, weaponClassOnly:'', excludeWeaponClass:''});
+        saveConfig(); renderEffects(); syncLabFromConfig();
+      });
+      card.querySelectorAll('[data-pfield]').forEach(input=>{
+        input.addEventListener('input', ()=>{
+          const field = input.dataset.pfield;
+          p[field] = field==='maxLevel' ? Math.max(1, Number(input.value)||1) : input.value;
+          saveConfig(); syncLabFromConfig();
+        });
+      });
+      card.querySelector('[data-delpassive]').addEventListener('click', ()=>{
+        if(CONFIG.passives.length<=1) return;
+        CONFIG.passives.splice(pIdx,1);
+        saveConfig(); renderFormula_passives(); syncLabFromConfig();
+      });
+    });
+  }
+
+  function renderFormulas(){
+    renderFormula_statusPointSystem();
+    renderFormula_baseConstants();
+    renderFormula_statCurve();
+    renderFormula_classes();
+    renderFormula_shield();
+    renderFormula_weapons();
+    renderFormula_magicCrit();
+    renderFormula_mitigation();
+    renderFormula_autospellGlobal();
+    renderFormula_passives();
+  }
+
+  const CATEGORY_RENDER = {
+    statusPointSystem: renderFormula_statusPointSystem,
+    baseConstants: renderFormula_baseConstants,
+    statCurve: renderFormula_statCurve,
+    classes: renderFormula_classes,
+    weapons: ()=>{ renderFormula_shield(); renderFormula_weapons(); },
+    magicCrit: renderFormula_magicCrit,
+    mitigation: renderFormula_mitigation,
+    autospellGlobal: renderFormula_autospellGlobal,
+    passives: renderFormula_passives,
+  };
+
+  function resetCategory(cat){
+    if(cat==='weapons'){ CONFIG.weapons = cloneDeep(DEFAULT_CONFIG.weapons); CONFIG.shieldProfile = cloneDeep(DEFAULT_CONFIG.shieldProfile); }
+    else { CONFIG[cat] = cloneDeep(DEFAULT_CONFIG[cat]); }
+    saveConfig();
+    (CATEGORY_RENDER[cat]||function(){})();
+    syncLabFromConfig();
+  }
+
+  /* --- add / import / export wiring --- */
+  function slugify(s){ return (s||'').trim().toLowerCase().replace(/[^a-z0-9_]+/g,'_').replace(/^_+|_+$/g,''); }
+
+  function wireFormulaControls(){
+    document.querySelectorAll('.catreset').forEach(btn=>{
+      btn.addEventListener('click', ()=>resetCategory(btn.dataset.cat));
+    });
+
+    document.getElementById('btnAddClass').addEventListener('click', ()=>{
+      const idInput = document.getElementById('newClassId');
+      const nameInput = document.getElementById('newClassName');
+      const id = slugify(idInput.value);
+      const msg = document.getElementById('configMsg');
+      if(!id){ msg.textContent='ใส่ id คลาสก่อน'; return; }
+      if(CONFIG.classes[id]){ msg.textContent='id นี้มีอยู่แล้ว'; return; }
+      CONFIG.classes[id] = {name: nameInput.value||id, hpCoef:1.0, spCoef:1.0, desc:''};
+      idInput.value=''; nameInput.value=''; msg.textContent='';
+      saveConfig(); renderFormula_classes(); syncLabFromConfig();
+    });
+
+    document.getElementById('btnAddWeapon').addEventListener('click', ()=>{
+      const idInput = document.getElementById('newWeaponId');
+      const nameInput = document.getElementById('newWeaponName');
+      const id = slugify(idInput.value);
+      const msg = document.getElementById('configMsg');
+      if(!id){ msg.textContent='ใส่ id อาวุธก่อน'; return; }
+      if(CONFIG.weapons[id]){ msg.textContent='id นี้มีอยู่แล้ว'; return; }
+      CONFIG.weapons[id] = {
+        name: nameInput.value||id, weaponClass:id, slotType:'1H', damageType:'slash',
+        atk:{stat:'str', coeff:1.0, stat2:'', coeff2:0}, aspdOffset:0, autospellEfficiency:1.0,
+        special:{critBonusFlat:0, hitBonusFlat:0, hitPenalty:0, defPenetrationPercent:0, hpRegenOnHitPercent:0, matkPercent:0, castReductionBonus:0},
+        affinity:[],
+      };
+      idInput.value=''; nameInput.value=''; msg.textContent='';
+      saveConfig(); renderFormula_weapons(); syncLabFromConfig();
+    });
+
+    document.getElementById('btnAddPassive').addEventListener('click', ()=>{
+      const idInput = document.getElementById('newPassiveId');
+      const nameInput = document.getElementById('newPassiveName');
+      const id = slugify(idInput.value);
+      const msg = document.getElementById('configMsg');
+      if(!id){ msg.textContent='ใส่ id passive ก่อน'; return; }
+      if(CONFIG.passives.some(p=>p.id===id)){ msg.textContent='id นี้มีอยู่แล้ว'; return; }
+      CONFIG.passives.push({id, name: nameInput.value||id, classId:'any', tier:1, maxLevel:5, desc:'',
+        requires:{passiveId:'', minLevel:0}, effects:[]});
+      idInput.value=''; nameInput.value=''; msg.textContent='';
+      saveConfig(); renderFormula_passives(); syncLabFromConfig();
+    });
+
+    document.getElementById('btnExportConfig').addEventListener('click', async ()=>{
+      const box = document.getElementById('configBox');
+      const msg = document.getElementById('configMsg');
+      const json = JSON.stringify(CONFIG, null, 2);
+      box.value = json;
+      try{ await navigator.clipboard.writeText(json); msg.textContent='คัดลอกแล้ว (และแสดงไว้ในกล่องด้านบนด้วย)'; }
+      catch(e){ box.select(); msg.textContent='คัดลอกอัตโนมัติไม่ได้ — เลือกข้อความในกล่องแล้ว Ctrl+C ได้เลย'; }
+    });
+
+    document.getElementById('btnImportConfig').addEventListener('click', ()=>{
+      const box = document.getElementById('configBox');
+      const msg = document.getElementById('configMsg');
+      try{
+        const parsed = JSON.parse(box.value);
+        if(!parsed || typeof parsed!=='object') throw new Error('bad shape');
+        CONFIG = parsed;
+        saveConfig();
+        renderFormulas();
+        syncLabFromConfig();
+        msg.textContent='นำเข้าสำเร็จ';
+      }catch(e){ msg.textContent='JSON ไม่ถูกต้อง นำเข้าไม่สำเร็จ'; }
+    });
+
+    document.getElementById('btnResetAllConfig').addEventListener('click', ()=>{
+      CONFIG = cloneDeep(DEFAULT_CONFIG);
+      saveConfig();
+      renderFormulas();
+      syncLabFromConfig();
+      document.getElementById('configMsg').textContent='คืนค่าเริ่มต้นทั้งหมดแล้ว';
+    });
+  }
+
+  /* ========================================================================
+     9) VIEW ROUTING (hash) + INIT
+  ======================================================================== */
+  function showView(name){
+    document.getElementById('view-lab').hidden = name!=='lab';
+    document.getElementById('view-formulas').hidden = name!=='formulas';
+    document.querySelectorAll('.tab-link').forEach(a=>a.classList.toggle('active', a.dataset.view===name));
+  }
+  function routeFromHash(){
+    const h = (location.hash||'#lab').slice(1);
+    showView(h==='formulas' ? 'formulas' : 'lab');
+  }
+
+  // --- init ---
+  loadConfig();
+  characterRaw = Object.assign({}, DEFAULT_RAW);
+  buildStatInputs();
+  buildClassSelect();
+  buildWeaponSelect();
+  buildPassives();
+  document.getElementById('inLevel').value = pickInitialLevel(characterRaw);
+  renderFormulas();
+  wireFormulaControls();
+
+  document.getElementById('btnResetStats').addEventListener('click', ()=>{
+    characterRaw = {str:1, agi:1, vit:1, int:1, dex:1, luk:1};
+    render();
+  });
+  document.getElementById('inClass').addEventListener('change', ()=>{ buildPassives(); render(); });
+  document.getElementById('btnToggleCombat').addEventListener('click', toggleCombat);
+  document.getElementById('btnResetCombat').addEventListener('click', ()=>{
+    resetCombatStats(); setupCombat(); combat.needsSetup = false; combat.monsterDown = false;
+    document.getElementById('dummySprite').classList.remove('down');
+    updateResultTiles(); updateMonsterHpUI();
+  });
+
+  document.addEventListener('input', (e)=>{ if(e.target.closest('#view-lab')) render(); });
+  document.addEventListener('change', (e)=>{ if(e.target.closest('#view-lab')) render(); });
+
+  window.addEventListener('hashchange', routeFromHash);
+  routeFromHash();
+
+  render();
+  setupCombat();
+  resetCombatStats();
+  combat.needsSetup = false;
+  updateResultTiles();
+  document.getElementById('stageMsg').hidden = false;
+})();
+</script>
