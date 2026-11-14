@@ -1,6 +1,8 @@
+> **เลิกใช้แล้ว:** `status-lab/` ถูกลบออก สูตรด้านล่างย้ายไปอยู่ใน `web/lab/src/04-stats.js` + `formulaConfig` (ครบทุกสูตรสเตตัส; castReduction, Double Attack, Autospell cap/efficiency ย้ายมาเป็นสเตตัส `castReduction`/`doubleAttack`/`autospellChance`) · ส่วน Combat Engine/Passive tree 24 ตัว/Mitigation ของเครื่องมือเดิมไม่ได้ย้าย (เกมใช้ระบบสกิลและตัวจำลองของ Skill Lab แทน) เอกสารนี้เก็บไว้อ้างอิงประวัติเท่านั้น
+
 # RO Status Lab — คู่มือเทคนิค
 
-ไฟล์: `status-lab/ro-status-lab.html` (V8, ไฟล์เดียว เปิดได้เลยด้วยเบราว์เซอร์) · ค่าเริ่มต้นของ CONFIG แยกให้อ่านง่ายที่ `status-lab/default-config.json` · ไลบรารี Node รุ่นแรกที่ `status-lab/ro-status-system.js`
+ไฟล์: `status-lab/ro-status-lab.html` (V8, ไฟล์เดียว เปิดได้เลยด้วยเบราว์เซอร์) · ค่าเริ่มต้นของ CONFIG แยกให้อ่านง่ายที่ `status-lab/default-config.json`
 
 โครงสร้างหลัก: **CONFIG ก้อนเดียว** (อ่านจากแท็บ "ตั้งค่าสูตร (Backend)" แก้ได้ทุกค่า) → ห้องทดลอง (แท็บ "ห้องทดลอง") อ่าน CONFIG นั้นคำนวณสเตตัส/ดาเมจ · บันทึกลง localStorage คีย์ `roStatusLabConfig_v1` (best-effort ใน try/catch) · `mergeMissingKeys` เติมคีย์ใหม่จาก DEFAULT_CONFIG ให้ข้อมูลเก่าที่บันทึกไว้โดยไม่เขียนทับของผู้ใช้
 
@@ -89,4 +91,3 @@ critDamageBonus = min(cap, base + eff.int×intScalar + Σ critDamageBonusFlat)
 - เพิ่ม passive ใหม่: เพิ่มใน `DEFAULT_CONFIG.passives` (หรือผ่านตัวแก้ใน backend) — ถ้าอยากได้ `target` ใหม่ ต้องเพิ่มคีย์ใน `st` ที่ `computeDerived` และนำไปใช้ในสูตร
 - เพิ่มอาวุธ/คลาสทำใน backend ได้เลย ไม่ต้องแตะโค้ด
 - แนวทางรวมกับ Skill Lab: ให้ Skill Lab เป็นแหล่งความจริงของสกิล แล้วเพิ่มปุ่มส่งออกค่าสเตตัส → JSON ให้ Skill Lab (ดู `EXTENDING.md` ข้อ 9)
-- `ro-status-system.js` เป็นไลบรารี Node รุ่นแรก (อ้างอิงแนวคิด curve/modifier/class hook) — **ไม่ได้ใช้งานจริงในหน้าเว็บ** และถูกกู้จากประวัติการสนทนา (create + 4 edits) ตรวจด้วย `node -e "require('./ro-status-system.js')"` ก่อนใช้

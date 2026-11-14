@@ -1,4 +1,4 @@
-// คัดลอกโมดูล Skill Lab จาก ../skill-lab/src ไป public/skill-lab (แหล่งความจริงคือ skill-lab/src)
+// คัดลอกโมดูล Skill Lab จาก ../lab/src ไป public/skill-lab (แหล่งความจริงคือ web/lab/src)
 // แล้วเขียน modules.json พร้อม version (hash ของเนื้อหา) เพื่อกัน cache ค้างเวอร์ชันเก่า
 import fs from "node:fs";
 import path from "node:path";
@@ -6,7 +6,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const src = path.resolve(here, "../../skill-lab/src");
+const src = path.resolve(here, "../lab/src");
 const out = path.resolve(here, "../public/skill-lab");
 fs.mkdirSync(path.join(out, "js"), { recursive: true });
 

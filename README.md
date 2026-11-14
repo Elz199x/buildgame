@@ -1,53 +1,58 @@
-# RO-Style Game System — Status Lab + Skill Lab
+# RO-Style Game System — Skill Lab
 
-โปรเจกต์ออกแบบระบบเกมแนว Ragnarok Online (ภาษาไทย) แบบ data-driven: **Status Lab** (จำลองสเตตัส) และ **Skill Lab** (จำลองสกิลแยกอิสระ) พร้อมบันทึกการออกแบบทั้งหมดและเอกสารสำหรับต่อยอดในเครื่อง
+โปรเจกต์ออกแบบระบบเกมแนว Ragnarok Online (ภาษาไทย) แบบ data-driven: **Skill Lab** (จำลองสเตตัสและสกิล; สูตรสเตตัสของ Status Lab เดิมรวมเข้ามาแล้ว) พร้อมบันทึกการออกแบบทั้งหมดและเอกสารสำหรับต่อยอดในเครื่อง
 
-## เริ่มเร็ว (ไม่ต้องติดตั้งอะไร)
+## ส่วนประกอบ
 
-| ต้องการ | ทำ |
+| ส่วน | คืออะไร |
 |---|---|
-| ลอง Skill Lab | ดับเบิลคลิก `skill-lab/dist/ro-skill-lab.standalone.html` |
-| ลอง Status Lab | ดับเบิลคลิก `status-lab/ro-status-lab.html` |
+| `server/` | เซิร์ฟเวอร์เกม Go (**gin + gorm** + Postgres): REST API, WebSocket 30Hz, ตัวจำลองสกิล/สเตตัส/ต่อสู้ — เซิร์ฟเวอร์เป็นเจ้าของความก้าวหน้าของผู้เล่นทั้งหมด |
+| `web/` | หน้าเว็บ Next.js: login, โฮสต์ Skill Lab ที่ `/`, หน้าทดสอบ `/online` |
+| `web/lab/src/` | โมดูล JS ของหน้าเกม/ตัวแก้ไข (วาดภาพ + ส่งคำสั่ง) — `web/` คัดลอกไปใช้ด้วย `npm run sync:lab` |
 
-เบราว์เซอร์สมัยใหม่ (Chrome/Edge/Firefox) · ข้อมูลที่แก้เก็บใน localStorage ของเบราว์เซอร์ · ฟอนต์ใช้ Google Fonts (ออฟไลน์จะใช้ฟอนต์สำรองอัตโนมัติ)
-
-## พัฒนา Skill Lab ต่อ
+## ทดสอบ Skill Lab (JS)
 
 ```bash
-cd skill-lab
-python3 build.py          # รวม src/*.js + shell.html → dist/*.html   (ต้องใช้ Python 3 เท่านั้น)
-node tests/test-core.js   # ทดสอบแกนหลัก (Node 18+ ไม่ต้องติดตั้ง package)
-npm install && npx playwright install chromium   # ครั้งเดียว ถ้าจะรันเทส UI
-npm run test:ui           # ui-smoke + ui-flow (Playwright), ภาพหน้าจอลง tests/out/
-npm run docs              # สร้าง docs/SKILL_TABLES.md และ BENCHMARK_REPORT.md ใหม่จากข้อมูลล่าสุด
-npm run all               # ทุกอย่างข้างบน
+cd web
+npm run lab:test      # ทดสอบแกนหลัก (ข้อมูลอ่านจาก seed ของเซิร์ฟเวอร์)
+npm run lab:docs      # สร้าง docs/SKILL_TABLES.md และ BENCHMARK_REPORT.md ใหม่จากข้อมูลล่าสุด
+npm run lab:golden    # สร้าง golden test ให้ฝั่ง Go เทียบสูตร (หลังแก้สูตรฝั่ง JS)
 ```
-แก้ไฟล์ใน `skill-lab/src/` เท่านั้น — `dist/` เป็นผลที่ build ออกมา
+
+## เล่น/พัฒนา: เซิร์ฟเวอร์ Go + Postgres + เว็บ Next.js
+
+ต้องมี Docker, Go 1.26+ และ Node 20+
+
+```bash
+docker compose up -d db                 # 1) ฐานข้อมูล Postgres (schema สร้างให้อัตโนมัติ)
+cd server && go run ./cmd/gameserver    # 2) เซิร์ฟเวอร์เกม  http://localhost:8080
+cd web && npm install && npm run dev    # 3) หน้าเว็บ        http://localhost:3000
+```
+
+เปิด http://localhost:3000 → สมัครสมาชิก (ผู้ใช้คนแรกได้เป็น admin) → เข้าเกม 2.5D
+(รัน 1+2 พร้อมกันใน Docker: `docker compose --profile app up -d --build`)
+
+**เซิร์ฟเวอร์เป็นเจ้าของเกม (server-authoritative)** — ตัวละครใหม่เริ่ม Lv.1 แล้วพัฒนาด้วยการเล่นจริงเท่านั้น:
+- ไคลเอนต์ส่งแค่ "คำสั่ง/อินพุต"; เซิร์ฟเวอร์ตัดสินดาเมจ มอนสเตอร์ HP/AI การล้มมอนสเตอร์ EXP ทอง ดรอป เลเวลอัป
+- คำสั่งความก้าวหน้า `POST /api/game/{learn,unlearn,stat,equip,unequip,weapon,shield,storage,shop,class}` — เซิร์ฟเวอร์ตรวจกติกา หักแต้ม/ทอง แล้วตอบ state ใหม่ (ไคลเอนต์ไม่คำนวณเอง)
+- หน้า **จำลองต่อสู้ (DPS)** ใช้ "แซนด์บ็อกซ์" (สำเนาตัวละครสำหรับลองค่า ไม่กระทบตัวละครจริง) และเรียก `/api/sim/*` ทั้งหมด: session ต่อสู้ (`/api/sim/sessions`), สเตตัสสุดท้าย/ดาเมจต่อสกิล (`/api/sim/skills`), benchmark/เทียบบิลด์, ลำดับสกิลอัตโนมัติ
+- ตัวละครของ admin สลับเป็น **โหมด Lab** ได้ (แก้ตัวละครอิสระเพื่อออกแบบ/ทดสอบ) ผ่านปุ่มในเมนูเกม; ผู้เล่นทั่วไปอยู่โหมดเกมเสมอ
+- ข้อมูลเกมและตัวละครอยู่ในฐานข้อมูล (ไม่ใช่ localStorage) — ดู `docs/DATABASE.md`; รายละเอียด API/ความปลอดภัย/โปรโตคอล/ตัวแปรสภาพแวดล้อม: `server/README.md`
 
 ## โครงสร้างโฟลเดอร์
 
 ```
-ro-game-project/
-├─ README.md                  ← ไฟล์นี้
-├─ CLAUDE.md                  ← บริบทโปรเจกต์ให้ Claude Code (ตอบภาษาไทย, กฎโค้ด, คำสั่ง)
-├─ skill-lab/                 ← แอปจำลองสกิล (หลัก)
-│  ├─ src/                    ← โมดูล 00–12, 99 + shell.html (แก้ที่นี่)
-│  ├─ dist/                   ← ไฟล์ HTML ที่ build แล้ว
-│  ├─ tests/                  ← test-core.js, ui-smoke.js, ui-flow.js
-│  ├─ tools/                  ← สคริปต์สร้างเอกสารจากข้อมูล
-│  ├─ build.py · package.json
-├─ status-lab/                ← แอปจำลองสเตตัส (V8) + default-config.json + ไลบรารี Node รุ่นแรก
+├─ README.md · CLAUDE.md      ← ภาพรวม / บริบทให้ Claude Code (ตอบภาษาไทย, กฎโค้ด, คำสั่ง)
+├─ server/                    ← เซิร์ฟเวอร์ Go (gin+gorm): cmd/gameserver · internal/{config,auth,store,gamedata,sim,progress,charsvc,game,protocol,realtime,httpapi} · migrations/
+├─ web/                       ← Next.js: login, โฮสต์ Skill Lab ที่ /, หน้า /online · lab/ (src โมดูล JS ของหน้าเกม · tests · tools)
+├─ docker-compose.yml         ← Postgres (+ เซิร์ฟเวอร์เกมด้วย --profile app) · .env.example
 └─ docs/
-   ├─ ARCHITECTURE.md         ← สถาปัตยกรรม Skill Lab (โมดูล, store, ลำดับโหลด)
-   ├─ DATA_SCHEMA.md          ← สคีมาข้อมูล (สกิล คลาส สาย อาวุธ ฯลฯ)
-   ├─ FORMULAS.md             ← สูตรคำนวณและกติกาตัวจำลอง
-   ├─ EXTENDING.md            ← สูตรการต่อยอด: เพิ่มสกิล/คลาส/สเตตัส/กลไก/หน้าใหม่
-   ├─ BALANCE_NOTES.md        ← เหตุผลของตัวเลข ผล balance และประเด็นที่ยังเปิดอยู่
-   ├─ STATUS_LAB.md           ← สูตรและ CONFIG ของ Status Lab
-   ├─ CHANGELOG.md            ← ประวัติการพัฒนา V1–V8, Skill Lab v1.0
-   ├─ SKILL_TABLES.md         ← ตารางสกิลทั้งหมด (สร้างอัตโนมัติ)
-   ├─ BENCHMARK_REPORT.md     ← ผลเทียบบิลด์ (สร้างอัตโนมัติ)
-   └─ design-notes/           ← บันทึกออกแบบต้นฉบับจากการสนทนา (13 ไฟล์)
+   ├─ ARCHITECTURE.md         ← สถาปัตยกรรมโมดูล JS (store, ลำดับโหลด)
+   ├─ DATA_SCHEMA.md · FORMULAS.md · EXTENDING.md · BALANCE_NOTES.md · CHANGELOG.md
+   ├─ SKILL_TABLES.md · BENCHMARK_REPORT.md   ← สร้างอัตโนมัติ
+   ├─ DATABASE.md             ← ตารางใน Postgres, migration, สำรองข้อมูล
+   ├─ protocol/               ← สเปกโปรโตคอลไบนารี 0xC7 (.fbs)
+   └─ design-notes/           ← บันทึกออกแบบต้นฉบับ
 ```
 
 ## อ่านอะไรก่อนดี
@@ -67,7 +72,5 @@ ro-game-project/
 
 ## ข้อควรรู้ / ข้อจำกัดปัจจุบัน
 
-- Skill Lab ครอบคลุมสกิล **Novice (10) และนักดาบ (15)** เท่านั้น — โจร/นักธนู/จอมเวทเป็นโครงเปล่า (มีใน Status Lab แค่ passive)
+- Skill Lab ครอบคลุมสกิล **Novice (10) และนักดาบ (15)** เท่านั้น — โจร/นักธนู/จอมเวทเป็นโครงเปล่า (สกิลโจรมีเฉพาะ passive)
 - ตัวจำลองไม่มี: ยา/ฮีลเอง, หลายเป้าหมาย, ปาร์ตี้, cast time, stun (ช่อง `hooks` เตรียมไว้ในข้อมูล แต่ยังไม่ทำงาน)
-- Status Lab กับ Skill Lab ยังแยกกัน — ค่าบางอย่างต่างกันโดยตั้งใจ (ดู `docs/BALANCE_NOTES.md` ข้อ 5)
-- `status-lab/ro-status-system.js` กู้คืนจากประวัติการสนทนา เป็นไลบรารีอ้างอิง ไม่ได้ใช้ในหน้าเว็บ

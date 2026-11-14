@@ -1,0 +1,17 @@
+.lg-page { --bg:#12161d; --card:#1a2029; --line:#2b3341; --fg:#e7eaf0; --mute:#8d96a8; --acc:#d1a44c; --bad:#ff7b72;
+  min-height:100vh; display:grid; place-items:center; padding:16px; background:var(--bg); color:var(--fg);
+  font-family:"IBM Plex Sans Thai","Noto Sans Thai",system-ui,sans-serif; }
+@media (prefers-color-scheme: light) {
+  .lg-page { --bg:#eef0f4; --card:#fff; --line:#d7dbe3; --fg:#1b222c; --mute:#636d80; --acc:#a97e2e; --bad:#b93f31; }
+}
+.lg-card { width:min(380px,100%); display:grid; gap:14px; padding:28px 24px; background:var(--card); border:1px solid var(--line); border-radius:14px;
+  box-shadow:0 12px 40px rgba(0,0,0,.35); }
+.lg-card h1 { margin:0; font-size:22px; } .lg-card h1 b { color:var(--acc); }
+.lg-muted { margin:0; color:var(--mute); font-size:14px; }
+.lg-card label { display:grid; gap:6px; font-size:13px; color:var(--mute); }
+.lg-card input { padding:10px 12px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--fg); font:inherit; }
+.lg-card input:focus { outline:2px solid var(--acc); outline-offset:1px; }
+.lg-card button[type=submit] { padding:11px; border:0; border-radius:8px; background:var(--acc); color:#1a1408; font:inherit; font-weight:700; cursor:pointer; }
+.lg-card button[type=submit]:disabled { opacity:.5; cursor:not-allowed; }
+.lg-link { background:none; border:0; color:var(--mute); font:inherit; font-size:13px; cursor:pointer; text-decoration:underline; }
+.lg-error { margin:0; padding:8px 10px; border-radius:8px; border:1px solid var(--bad); color:var(--bad); font-size:13px; }

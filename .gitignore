@@ -1,6 +1,21 @@
+# dependencies / build output
 node_modules/
-skill-lab/tests/out/
+*.exe
+*.test
+web/.next/
+
+# สร้างอัตโนมัติจาก web/lab/src (npm run sync:lab) — แก้ที่ web/lab/src เท่านั้น
+web/public/skill-lab/
+
+# secrets / local config
+.env
+.env.*
+!.env.example
+
+# test artifacts
+web/lab/tests/out/
+
+# misc
 .DS_Store
 *.log
-*.exe
-web/public/skill-lab/
+*.tsbuildinfo

@@ -1,16 +1,32 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import ChatPanel from "@/components/ChatPanel";
 import WorldCanvas, { type SelfHud } from "@/components/WorldCanvas";
-import { GATEWAY_URL, useGateway } from "@/lib/useGateway";
+import { auth, NetworkError, wsUrl } from "@/lib/api";
+import { useGateway } from "@/lib/useGateway";
 
-export default function Home() {
-  const [name, setName] = useState("Hero");
-  // สุ่มชื่อหลัง mount เท่านั้น (สุ่มตอน render ทำให้ SSR กับ client ไม่ตรงกัน → hydration error)
-  useEffect(() => setName(`Hero${Math.floor(Math.random() * 900 + 100)}`), []);
-  const { status, ping, tick, chat, mobsRef, peersRef, peerCount, send } = useGateway(name);
+// หน้าทดสอบ Gateway แบบเรียบ — ต้องล็อกอิน (เซิร์ฟเวอร์ตรวจ cookie เซสชันตอนต่อ WebSocket)
+export default function OnlinePage() {
+  const router = useRouter();
+  const [name, setName] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    auth
+      .me()
+      .then((me) => (me ? setName(me.character?.name ?? me.user.username) : router.replace("/login")))
+      .catch((e) => setError(e instanceof NetworkError ? "เชื่อมต่อเซิร์ฟเวอร์เกมไม่ได้" : "เกิดข้อผิดพลาด"));
+  }, [router]);
+
+  if (error) return <main style={{ display: "block" }}><p>{error}</p></main>;
+  if (!name) return <main style={{ display: "block" }}><p>กำลังตรวจสอบเซสชัน…</p></main>;
+  return <Game name={name} />;
+}
+
+function Game({ name }: { name: string }) {
+  const { status, ping, tick, chat, mobsRef, peersRef, selfUidRef, peerCount, send } = useGateway(name);
   const [hud, setHud] = useState<SelfHud>({ hp: 0, maxHp: 0, rollCd: 0, x: 0, y: 0 });
-
   const hpPct = hud.maxHp > 0 ? Math.round((hud.hp / hud.maxHp) * 100) : 0;
 
   return (
@@ -21,8 +37,12 @@ export default function Home() {
         <span className="chip">ping {ping ?? "—"} ms</span>
         <span className="chip">server tick {tick}</span>
         <span className="chip">ผู้เล่น {peerCount}</span>
-        <a className="chip" href="/">เกม 2.5D →</a>
-        <span className="chip" title="Gateway URL">{GATEWAY_URL}</span>
+        <a className="chip" href="/">
+          เกม 2.5D →
+        </a>
+        <span className="chip" title="Gateway URL">
+          {wsUrl()}
+        </span>
       </header>
       <section className="panel">
         <div className="hud">
@@ -37,15 +57,15 @@ export default function Home() {
           </div>
         </div>
         <div className="stage">
-          <WorldCanvas mobsRef={mobsRef} peersRef={peersRef} send={send} onHud={setHud} />
+          <WorldCanvas mobsRef={mobsRef} peersRef={peersRef} selfUidRef={selfUidRef} send={send} onHud={setHud} />
           {status !== "online" && (
             <div className="overlay">
               {status === "connecting" ? "กำลังเชื่อมต่อ Gateway…" : "ขาดการเชื่อมต่อ — กำลังลองใหม่"}
-              <small>รันเซิร์ฟเวอร์: node server/dev-cluster.js</small>
+              <small>ต้องเปิดเซิร์ฟเวอร์: cd server &amp;&amp; go run ./cmd/gameserver</small>
             </div>
           )}
         </div>
-        <p className="hint">WASD / ลูกศร = เดิน · Space = กลิ้งหลบ (อมตะชั่วขณะ) · คลิกมอนสเตอร์ในระยะ = โจมตี (ดาเมจคำนวณที่เซิร์ฟเวอร์)</p>
+        <p className="hint">WASD / ลูกศร = เดิน · Space = กลิ้งหลบ (อมตะชั่วขณะ) · คลิกมอนสเตอร์ในระยะ = โจมตี (ดาเมจคำนวณที่เซิร์ฟเวอร์ Go)</p>
       </section>
       <ChatPanel lines={chat} send={send} name={name} />
     </main>

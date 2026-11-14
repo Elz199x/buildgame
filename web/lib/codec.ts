@@ -1,14 +1,17 @@
-// Binary Wire Codec (0xC7) — ตรงกับ skill-lab/src/05b-net-codec.js และ Go Gateway/Sim
+// Binary Wire Codec (0xC7) — ตรงกับ web/lab/src/05b-net-codec.js และ Go Gateway/Sim
 export const MAGIC = 0xc7;
 export const VERSION = 1;
 export const OP = {
   PING: 0x01,
   PONG: 0x02,
-  AUTH: 0x03,
+  USE_ITEM: 0x14,
+  WELCOME: 0x04,
   MOVE: 0x10,
   ATTACK: 0x11,
   ROLL: 0x13,
   WORLD_SNAPSHOT: 0x20,
+  STATE_SYNC: 0x24, // เซิร์ฟเวอร์→เจ้าของ: ตัวละครทั้งก้อน (JSON) — ใช้ในเกมหลัก (skill-lab) ไม่ใช่หน้านี้
+  REWARD: 0x25, // เซิร์ฟเวอร์→เจ้าของ: EXP/ทอง/ไอเทมจากการล้มมอนสเตอร์
   CHAT: 0x30,
 } as const;
 
@@ -21,6 +24,7 @@ export interface Mob { uid: number; x: number; y: number; hp: number; alive: boo
 
 export type Decoded =
   | { op: typeof OP.PONG; clientTs: number; serverTick: number }
+  | { op: typeof OP.WELCOME; uid: number }
   | { op: typeof OP.WORLD_SNAPSHOT; tick: number; peers: Peer[]; mobs: Mob[] }
   | { op: typeof OP.CHAT; channel: number; sender: string; text: string }
   | { op: number };
@@ -68,20 +72,6 @@ export function encodeAttack(a: { seq: number; targetUid: number; x: number; y: 
   return buf;
 }
 
-export function encodeAuth(p: { name: string; classId: string; weaponId: string; baseLv?: number; jobLv?: number }): ArrayBuffer {
-  const n = enc.encode(p.name).slice(0, 64);
-  const buf = new ArrayBuffer(9 + n.byteLength);
-  const dv = new DataView(buf);
-  header(dv, OP.AUTH);
-  dv.setUint8(4, Math.max(0, (CLASS_CODES as readonly string[]).indexOf(p.classId)));
-  dv.setUint8(5, Math.max(0, (WEAPON_CODES as readonly string[]).indexOf(p.weaponId)));
-  dv.setUint8(6, p.baseLv ?? 50);
-  dv.setUint8(7, p.jobLv ?? 50);
-  dv.setUint8(8, n.byteLength);
-  new Uint8Array(buf, 9).set(n);
-  return buf;
-}
-
 export function encodeRoll(r: { seq: number; x: number; y: number; dx: number; dy: number }): ArrayBuffer {
   const buf = new ArrayBuffer(16);
   const dv = new DataView(buf);
@@ -117,6 +107,9 @@ export function decode(ab: ArrayBuffer): Decoded | null {
 
   if (op === OP.PONG && ab.byteLength >= 16) {
     return { op: OP.PONG, clientTs: dv.getFloat64(4, true), serverTick: dv.getUint32(12, true) };
+  }
+  if (op === OP.WELCOME && ab.byteLength >= 8) {
+    return { op: OP.WELCOME, uid: dv.getUint32(4, true) };
   }
   if (op === OP.WORLD_SNAPSHOT && ab.byteLength >= 10) {
     const pCount = dv.getUint8(8);

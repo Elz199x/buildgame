@@ -4,6 +4,9 @@
   "private": true,
   "scripts": {
     "sync:lab": "node scripts/sync-skill-lab.mjs",
+    "lab:test": "node lab/tests/test-core.js",
+    "lab:golden": "node lab/tools/gen-golden.js",
+    "lab:docs": "node lab/tools/gen-skill-tables.js && node lab/tools/bench-report.js",
     "predev": "node scripts/sync-skill-lab.mjs",
     "prebuild": "node scripts/sync-skill-lab.mjs",
     "dev": "next dev -p 3000",

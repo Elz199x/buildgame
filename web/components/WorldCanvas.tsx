@@ -17,13 +17,14 @@ export interface SelfHud { hp: number; maxHp: number; rollCd: number; x: number;
 interface Props {
   mobsRef: React.RefObject<Mob[]>;
   peersRef: React.RefObject<Peer[]>;
+  selfUidRef: React.RefObject<number>;
   send: (f: ArrayBuffer) => void;
   onHud?: (h: SelfHud) => void;
 }
 
 interface Floater { x: number; y: number; text: string; color: string; life: number }
 
-export default function WorldCanvas({ mobsRef, peersRef, send, onHud }: Props) {
+export default function WorldCanvas({ mobsRef, peersRef, selfUidRef, send, onHud }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sendRef = useRef(send);
   sendRef.current = send;
@@ -153,10 +154,10 @@ export default function WorldCanvas({ mobsRef, peersRef, send, onHud }: Props) {
 
       trackDamage();
 
-      // หา peer ที่เป็นตัวเรา (Go Sim ส่งเราอยู่ใน peers ด้วย) เพื่อดึง HP จริงจากเซิร์ฟเวอร์
+      // peer ที่ uid ตรงกับที่เซิร์ฟเวอร์กำหนดให้เรา (WELCOME) คือตัวเรา — ใช้ดึง HP จริงจากเซิร์ฟเวอร์
       const others: Peer[] = [];
       for (const p of peersRef.current ?? []) {
-        if (Math.hypot(p.x - me.x, p.y - me.y) < 14) { me.hp = p.hp; me.maxHp = p.maxHp; }
+        if (p.uid === selfUidRef.current) { me.hp = p.hp; me.maxHp = p.maxHp; }
         else others.push(p);
       }
       if (now - hudAt >= HUD_MS) {
@@ -239,7 +240,7 @@ export default function WorldCanvas({ mobsRef, peersRef, send, onHud }: Props) {
       window.removeEventListener("blur", blur);
       cv.removeEventListener("pointerdown", onClick);
     };
-  }, [mobsRef, peersRef]);
+  }, [mobsRef, peersRef, selfUidRef]);
 
   return <canvas ref={canvasRef} width={1200} height={850} />;
 }

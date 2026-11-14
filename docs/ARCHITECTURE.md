@@ -13,14 +13,13 @@
 | เพิ่มสกิล/คลาส/สาย ได้ภายหลัง | ทุกอย่างเป็น **ข้อมูลล้วน** (JSON) ใน `DEFAULT_DATA` / หน้า "ตัวแก้ไข" / นำเข้า JSON — ไม่มีสกิลใดฝังอยู่ในโค้ด |
 | ไม่กระทบส่วนอื่น | แยกโมดูล, แยก data กับ state, UI ไม่มี logic เกม, ทุกการแก้ผ่านจุดเดียว (`store.change`) แล้วแจ้งผู้ฟัง |
 | ปรับการเชื่อมต่อสกิลง่าย | การเชื่อมต่อ = อาเรย์ `requires:[{id,lv}]` ในสกิลปลายทาง; กราฟวาดจากข้อมูลทั้งหมด; แก้ได้ทั้งสองฝั่งในตัวแก้ไข; validator จับ cycle |
-| แยกจาก Status Lab | ไฟล์/namespace/localStorage แยกกัน; เชื่อมกันด้วย "ชีตสเตตัส" (JSON) เท่านั้น |
 
 ## 2. ภาพรวมเลเยอร์
 
 ```mermaid
 flowchart TB
   subgraph DATA["ข้อมูลล้วน (ไม่มีตรรกะ)"]
-    DEF["01-defaults.js<br/>DEFAULT_DATA"]
+    DEF["seed JSON (เซิร์ฟเวอร์)<br/>/api/data"]
   end
   subgraph CORE["แกนหลัก — ห้ามแตะ DOM (รันใน Node ได้)"]
     UTIL["00-util<br/>S, clamp, clone"] --> STORE["02-store<br/>data + state"]
@@ -47,7 +46,7 @@ flowchart TB
 | ไฟล์ | `SL.*` ที่ export | หน้าที่ | ห้ามทำ |
 |---|---|---|---|
 | `00-util.js` | `util` | `val(S,lv)`, `lin`, `sMode`, `clone`, `fmt`, `preview`, `slug`, `clamp` | — |
-| `01-defaults.js` | `DEFAULT_DATA` | ข้อมูลเริ่มต้นทั้งชุด (คลาส/สาย/สกิล/อาวุธ/สเตตัส/พรีเซ็ต/มอนสเตอร์/บิลด์/ค่ากลาง) | ใส่ตรรกะ |
+| _(ไม่มีโมดูลข้อมูลในเบราว์เซอร์)_ | — | ข้อมูลเกมทั้งชุดมาจากฐานข้อมูลผ่าน `/api/data` (seed = `server/internal/gamedata/seed/game-data.json`) | ฝังค่าเริ่มต้นในโค้ด |
 | `02-store.js` | `store`, `state`, `loadAll` | เก็บ/โหลด/บันทึก data และ state, `normalize`, `sanitize`, import/export | รู้จัก UI |
 | `03-rules.js` | `rules` | `chain`, `visibleSkills`, `pointInfo`, `canLearn/Unlearn`, `learn/unlearn`, `applyBuild`, `weaponOk`, `defaultRotation`, `validate` | แตะ DOM |
 | `04-stats.js` | `calc` | `player()`, `monster()`, `components()`/`roll()` (ดาเมจ), `monsterStrike()`, `usage()`, ตัวช่วยแสดงผลสเตตัส | มีเวลา/สถานะค้าง (เป็นฟังก์ชันล้วน) |
@@ -69,7 +68,7 @@ flowchart TB
 |---|---|---|
 | คืออะไร | นิยามเกม: คลาส สาย สกิล อาวุธ สเตตัส พรีเซ็ต มอนสเตอร์ บิลด์ ค่ากลาง | ตัวละครที่กำลังทดสอบ: คลาส, Job Lv, สกิลที่ลง, ชีตสเตตัส, อาวุธ/โล่, มอนสเตอร์, ลำดับสกิลอัตโนมัติ, ตัวเลือก |
 | คนแก้ | หน้า "ตัวแก้ไข" / "ข้อมูล" | หน้า "จำลอง" / "ต้นไม้สกิล" |
-| localStorage | `roSkillLabData_v1` | `roSkillLabState_v1` |
+| ที่เก็บ | ข้อมูลเกม: ฐานข้อมูล (`/api/data`) | ตัวละคร: ฐานข้อมูล (`/api/characters/me/state`) |
 | แก้ผ่าน | `store.change(fn, reason)` | `state.change(fn)` |
 
 การแยกนี้ทำให้ "แก้นิยามสกิล" ไม่ทำลายตัวละครที่กำลังทดสอบ: ทุกครั้งที่ data เปลี่ยน `store.change` จะเรียก `state.sanitize()` ซึ่ง **ตัด** สิ่งที่อ้างถึงของที่ไม่มีแล้ว (สกิลที่ถูกลบ คลาสที่หาย เลเวลเกิน max) และ clamp ค่าให้ถูกต้อง แทนที่จะปล่อยให้พัง
@@ -86,7 +85,7 @@ sequenceDiagram
   participant M as 99-main
   U->>P: แก้ช่อง (event "change" = Enter/ออกจากช่อง)
   P->>S: store.change(fn,'editor') / state.change(fn)
-  S->>S: normalize → sanitize state → บันทึก localStorage
+  S->>S: normalize → sanitize state → บันทึกขึ้นเซิร์ฟเวอร์ (แอดมินเท่านั้น)
   S-->>M: emit(reason)
   M->>M: notify() รวมหลายเหตุการณ์ใน microtask เดียว
   M->>P: page.update('full' | 'editor' | 'state') เฉพาะหน้าที่เปิดอยู่
@@ -130,19 +129,15 @@ sequenceDiagram
 4. state ถูก sanitize ตามข้อมูลใหม่ — ลบสกิลแล้วตัวละครไม่พัง
 5. UI ไม่มีพิกัด/ตรรกะเกม — แก้ข้อมูลแล้ว UI ปรับเอง
 6. validator (`rules.validate`) จับ cycle, อ้างสกิลที่ไม่มี, เลเวลเกิน, Job Lv ย้อนลำดับ, สเตตัสที่ไม่มีนิยาม ฯลฯ ก่อนที่จะกลายเป็นบั๊กตอนจำลอง
-7. Skill Lab ไม่แก้และไม่โหลดโค้ดของ Status Lab (เชื่อมด้วยชีตสเตตัส JSON)
 8. `hooks:{}` ในสกิลเก็บ metadata ของระบบอนาคต (knockback, stun, partyShare …) โดยยังไม่ต้องมีโค้ดรองรับ
 
-## 10. ความสัมพันธ์กับ Status Lab
+## 10. Status Lab (เลิกใช้แล้ว)
 
-- ทั้งสองเป็น HTML ไฟล์เดียวที่ไม่พึ่งกัน (ดู `status-lab/` และ `docs/STATUS_LAB.md`)
-- ค่าตัวเลขเริ่มต้นของ preset ใน Skill Lab (`presets[].sheet`) ถูกคำนวณมือจากสูตรของ Status Lab (นักดาบ Lv50: STR40 AGI40 VIT30 INT30 DEX40 LUK20)
-- ช่องทางเชื่อมต่อตอนนี้: หน้า "จำลอง → สเตตัสของตัวละคร (ชีต)" มีช่อง **นำเข้า JSON** รับคีย์ที่ตรงกับ `statDefs` (รองรับห่อใน `stats`/`derived`/`sheet` และ `weaponId`/`hasShield`)
-- งานต่อ (ยังไม่ได้ทำ): เพิ่มปุ่ม "คัดลอก derived stats เป็น JSON" ใน Status Lab เพื่อให้ปลายทางนี้รับตรง ๆ และหรือย้ายสูตรร่วมไปเป็นแพ็กเกจเดียวกัน
+สูตรสเตตัสของ Status Lab ถูกรวมเข้า `computeDerivedFromRaw` (JS) / `ComputeDerivedFromRaw` (Go) และ `formulaConfig` ในข้อมูลเกม (เก็บใน DB ผ่าน `/api/data`) — ไม่มีโฟลเดอร์ `status-lab/` แล้ว ดูสูตรใน `docs/STATUS_LAB.md` (เก็บไว้เป็นเอกสารอ้างอิง)
 
 ## 11. ข้อจำกัดที่ตั้งใจ (simplifications)
 
 - เป้าหมายเดียว (AoE คูณด้วย `opts.aoeTargets` เท่านั้น) · ไม่มีระบบยา/ไอเท็ม/ปาร์ตี้/aggro · ไม่มี cast time/สกิลขัดจังหวะ (ใช้เวลา 1 จังหวะตี)
 - สถานะเด่น ๆ (stun, knockback) อยู่ใน `hooks` เป็นข้อความเฉย ๆ ยังไม่ทำงาน
-- การตีธรรมดา = 100% ATK กายภาพ (ไม่รวม autospell/double attack ของ Status Lab)
+- การตีธรรมดา = 100% ATK กายภาพ + Double Attack (สเตตัส `doubleAttack` ตีซ้ำ 1 ครั้ง) · ยังไม่มี autospell proc (`autospellChance` เป็นแค่สเตตัส)
 - ผู้เล่นฝั่งเดียวที่ถูกสวนกลับ; มอนสเตอร์ไม่มีสกิล

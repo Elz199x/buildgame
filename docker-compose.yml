@@ -1,0 +1,55 @@
+# Cat Quest × RO — สภาพแวดล้อมพัฒนา/รันด้วย Docker
+#
+#   docker compose up -d db          # เฉพาะฐานข้อมูล (แล้วรันเซิร์ฟเวอร์ด้วย `go run ./cmd/gameserver` ในโฟลเดอร์ server/)
+#   docker compose --profile app up -d --build   # ฐานข้อมูล + เซิร์ฟเวอร์เกมใน container
+#   docker compose down              # หยุด (ข้อมูลยังอยู่ใน volume catquest_pgdata)
+#   docker compose down -v           # หยุด + ลบข้อมูลทั้งหมด
+#
+# ตั้งค่าผ่านไฟล์ .env (ดู .env.example) — พอร์ตฐานข้อมูลฝั่งเครื่องคือ 5433 เพื่อไม่ชนกับ Postgres อื่นที่ใช้ 5432
+name: catquest
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: catquest-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-catquest}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-catquest_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-catquest}
+    ports:
+      # ผูกเฉพาะ localhost — ไม่เปิดฐานข้อมูลสู่เครือข่าย
+      - "127.0.0.1:${DB_PORT:-5433}:5432"
+    volumes:
+      - catquest_pgdata:/var/lib/postgresql/data
+      # สคีมาพร้อมใช้ตั้งแต่ครั้งแรกที่สร้าง container (เซิร์ฟเวอร์รัน migration ซ้ำได้อย่างปลอดภัย)
+      - ./server/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  server:
+    profiles: ["app"]
+    build:
+      context: ./server
+    container_name: catquest-server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      LISTEN_ADDR: 0.0.0.0:8080
+      DATABASE_URL: postgres://${POSTGRES_USER:-catquest}:${POSTGRES_PASSWORD:-catquest_dev_password}@db:5432/${POSTGRES_DB:-catquest}?sslmode=disable
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      FIRST_USER_IS_ADMIN: ${FIRST_USER_IS_ADMIN:-true}
+    ports:
+      - "127.0.0.1:${SERVER_PORT:-8080}:8080"
+
+volumes:
+  catquest_pgdata:
+    name: catquest_pgdata

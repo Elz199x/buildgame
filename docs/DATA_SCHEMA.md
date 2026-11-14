@@ -1,6 +1,6 @@
 # โครงสร้างข้อมูล (Data Schema)
 
-ข้อมูลทั้งหมดของ Skill Lab เป็น JSON ล้วน เก็บเป็นอ็อบเจ็กต์เดียว (`SL.store.get()`) ที่มี 9 ส่วน นิยามเริ่มต้นอยู่ที่ `skill-lab/src/01-defaults.js`
+ข้อมูลทั้งหมดของ Skill Lab เป็น JSON ล้วน เก็บเป็นอ็อบเจ็กต์เดียว (`SL.store.get()`) ที่มี 9 ส่วน เก็บในฐานข้อมูล (seed: `server/internal/gamedata/seed/game-data.json`)
 ฟิลด์ที่ไม่ใส่ จะถูกเติมค่าเริ่มต้นโดย `normalizeData/normalizeSkill` ใน `02-store.js` (ระบุสกิลแบบย่อได้ เช่น `{id, class, name, effects:[{stat:'atk', value:1}]}`)
 
 ```jsonc
@@ -132,7 +132,7 @@
 ```json
 { "id":"physCrit", "name":"Phys Crit %", "group":"โจมตี", "kind":"pct" }
 ```
-`kind`: `num` ตัวเลขปกติ · `frac` เศษส่วน (0.05 = 5%) · `pct` หน่วยเป็น % อยู่แล้ว (7 = 7%) — ใช้กำหนดวิธีแสดงผลและสเกลของช่องกรอก · รหัสเริ่มต้น 25 ตัว: `str agi vit int dex luk atk matk hit aspd physCrit magicCrit mdefIgnore critDmg defPen def mdef flee blockChance physReduction damageTaken maxHp maxSp hpRegen spRegen`
+`kind`: `num` ตัวเลขปกติ · `frac` เศษส่วน (0.05 = 5%) · `pct` หน่วยเป็น % อยู่แล้ว (7 = 7%) — ใช้กำหนดวิธีแสดงผลและสเกลของช่องกรอก · รหัสเริ่มต้น 28 ตัว: `str agi vit int dex luk atk matk hit aspd physCrit magicCrit mdefIgnore critDmg defPen def mdef flee blockChance physReduction damageTaken maxHp maxSp hpRegen spRegen doubleAttack autospellChance castReduction`
 สเตตัสใหม่: เพิ่มใน `statDefs` + ใส่ค่า (ถ้าไม่ใส่ = 0) ในชีตของ preset → ใช้ใน `effects`/`terms` ได้ทันที (ถ้าจะให้ "มีความหมาย" ในสูตร ต้องแก้ `04-stats.js`)
 
 ## 7. `presets` (ชุดสเตตัสสำเร็จรูป)
@@ -171,3 +171,15 @@
 
 - **แทนที่ทั้งหมด:** วาง JSON ที่ส่งออกมา (ต้องมีอาเรย์ `skills`)
 - **รวมเข้า (merge):** วางได้ 3 แบบ — (1) สกิลเดียว `{ "id":..., "type":... }` (2) อาเรย์ของสกิล (3) ชุดบางส่วน `{ "classes":[...], "branches":[...], "skills":[...] }` · แต่ละรายการที่ `id` ตรงกับของเดิมจะ **แทนที่**, ที่ไม่มีจะ **เพิ่ม** (รองรับคอลเลกชัน classes/branches/skills/weapons/statDefs/presets/monsters/builds)
+
+## `rules` — กติกาเกม (อยู่ใน DB ทั้งหมด ไม่มีค่าฝังในโค้ด)
+
+เซิร์ฟเวอร์ปฏิเสธข้อมูลที่ขาดคีย์ในหมวดนี้ (`server/internal/gamedata/validate.go`)
+
+| หมวด | ค่า |
+|---|---|
+| `progression` | `maxBaseLevel`, `maxShopQty`, `starterGold`, `starterWeaponId`, `starterStat`, `starterItems[{id,qty}]`, `baseExp`/`jobExp` `{base, perLevelSq}` (EXP เลื่อนเลเวล = round(base + Lv² × perLevelSq)), `minExpRequired`, `defaultKillExp`, `defaultBuyPrice`, `sellRatio`, `minSellPrice`, `defaultDropChance` |
+| `lab` | ตัวละครตั้งต้นของโหมดตัวแก้ไข: `classId`, `baseLv`, `jobLv`, `gold`, `rawStats`, `inventory[{id,qty}]`, `storage[{id,qty}]` |
+| `world` | `townX`, `townY`, `rollIFrame`, `mobRespawn`, `playerRadius`, `mobBaseRadius`, `aoeRadius`, `aoeMaxTargets` |
+
+ที่ยังอยู่ในโค้ดโดยตั้งใจ (ขีดจำกัดทางวิศวกรรม/กันโกง ไม่ใช่กติกาเกม): ความเร็วเคลื่อนที่สูงสุด, โควตาการเคลื่อนที่, ความหน่วงที่ยอมรับ, ช่วงห่างขั้นต่ำของคำสั่ง, ความถี่ tick/ส่งสถานะ, ขนาดโลก, ขีดจำกัดขนาดคำขอ/เซสชันจำลอง

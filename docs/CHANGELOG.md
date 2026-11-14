@@ -10,7 +10,9 @@
 5. `DAMAGE_TYPES` (slash/pierce/blunt/magic) → `05` · Magic Crit และ Magic Crit Triad (LUK/DEX/INT คนละแกน) → `06–07`
 6. Autospell-on-attack ให้สายกายภาพได้เวทแบบด้อยกว่า, ตาราง EV ของ DPS, วิเคราะห์ Mage ปั๊ม AGI+INT+LUK, อธิบาย autospell ของ RO จริง → `08–11`
 
-## RO Status Lab (`status-lab/ro-status-lab.html`)
+> 2026-11-14: ลบ `status-lab/` ออกแล้ว — ย้ายสูตรที่เหลือ (castReduction, Double Attack, Autospell cap/efficiency) เข้า Skill Lab + Go (`thDouble` ให้ Double Attack 4%/เลเวล เฉพาะกริช)
+
+## RO Status Lab (เดิม `status-lab/ro-status-lab.html`)
 | เวอร์ชัน | สิ่งที่เพิ่ม |
 |---|---|
 | V1 | หน้าเว็บจำลองสเตตัสทั้งระบบ: Base Level + raw stat + diminishing curve, คลาส 5 แบบ, อาวุธ 8 โปรไฟล์ (ล็อกมือรองเมื่อถือ 2H), passive 5 ตัว, autospell จากไอเทมแยกจาก passive (รวมแล้วชน cap), ดัมมี่ + จำลองต่อสู้ 20 วินาที |
@@ -34,3 +36,9 @@
 - `store.change` เรียก `state.sanitize()` ซึ่งตัดสกิลที่ id หาย → การ rename ต้องจดค่าไว้ก่อนแล้วเขียนกลับ
 - แถบคูลดาวน์สกิลเข้มเกินในธีมสว่าง → ใช้ `color-mix` กับสี `--fg`
 - กราฟต้นไม้กว้างเกิน → จำกัด 2 สกิลต่อแถวในสายเดียวกัน (`PER`) แล้วขึ้นแถวย่อย
+
+## Server-authoritative game (gin + gorm)
+- เซิร์ฟเวอร์ Go ย้ายมาใช้ gin + gorm; เพิ่ม `internal/progress` (กติกาความก้าวหน้า) และ `internal/charsvc` (แก้ตัวละครแบบอะตอมมิก)
+- EXP/ทอง/ดรอป/เลเวล/เรียนสกิล/ทุ่มสเตตัส/สวมใส่/ร้านค้า/คลัง/เลื่อนอาชีพ ตัดสินที่เซิร์ฟเวอร์ (`/api/game/*`, WebSocket REWARD/STATE_SYNC); ตัวละครมี `mode` game/lab
+- หน้า DPS เรียก `/api/sim/*` ทั้งหมด (session ต่อสู้, สเตตัสสุดท้าย, ดาเมจต่อสกิล, benchmark, เทียบบิลด์, ลำดับสกิลอัตโนมัติ) ผ่านแซนด์บ็อกซ์ที่ไม่กระทบตัวละครจริง
+- ลบไฟล์ที่ไม่ใช้: `archive/`, `skill-lab/dist/`, `build.py`, `tools/build.js`, เทส UI ที่พึ่ง dist, `status-lab/ro-status-system.js`
