@@ -18,8 +18,25 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"catquest-ro/server/internal/gamedata"
 	"catquest-ro/server/internal/store"
 )
+
+// SeedGame ใส่ข้อมูลเกมตั้งต้น (อาชีพ/สกิล ฯลฯ) — ตัวละครอ้างอาชีพด้วย FK จึงต้องมีก่อนสร้างผู้ใช้
+func SeedGame(t testing.TB, db *store.Store) {
+	t.Helper()
+	cfg, tables, err := gamedata.SplitDoc(gamedata.Seed())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := make(map[string][]byte, len(cfg))
+	for k, v := range cfg {
+		parts[k] = v
+	}
+	if err := db.SeedGameDataIfEmpty(context.Background(), parts, tables); err != nil {
+		t.Fatalf("ใส่ข้อมูลเกมตั้งต้นไม่สำเร็จ: %v", err)
+	}
+}
 
 // New สร้างฐานข้อมูลใหม่ + รัน migration แล้วลบทิ้งเมื่อเทสต์จบ
 func New(t testing.TB) *store.Store {

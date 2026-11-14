@@ -20,11 +20,11 @@ import (
 	"catquest-ro/server/internal/store"
 )
 
-// ---------- ข้อมูลเกม (แยกหมวด + มีเวอร์ชัน) ----------
+// ---------- ข้อมูลเกม (หมวดเอกสาร + ตารางรายการ) ----------
 
 func (s *Server) getData(c *gin.Context) {
-	payload, ver := s.data.Payload()
-	etag := `"v` + strconv.FormatInt(ver, 10) + `"`
+	payload, tag := s.data.Payload()
+	etag := `"` + tag + `"`
 	c.Header("ETag", etag)
 	c.Header("Cache-Control", "private, no-cache")
 	if c.GetHeader("If-None-Match") == etag {
@@ -40,16 +40,18 @@ func dataErr(c *gin.Context, err error, what string) {
 	case errors.Is(err, ErrInvalidData):
 		writeErr(c, http.StatusBadRequest, err.Error())
 	case errors.Is(err, ErrUnknownCat), errors.Is(err, store.ErrNotFound):
-		writeErr(c, http.StatusNotFound, "ไม่พบหมวดหรือเวอร์ชันที่ระบุ")
+		writeErr(c, http.StatusNotFound, "ไม่พบหมวด ตาราง รายการ หรือเวอร์ชันที่ระบุ")
 	case errors.Is(err, ErrConflict):
 		writeErr(c, http.StatusConflict, err.Error()+" — โหลดข้อมูลล่าสุดแล้วลองใหม่")
+	case errors.Is(err, ErrRefs):
+		writeErr(c, http.StatusConflict, err.Error())
 	default:
 		slog.Error(what, "err", err)
 		writeErr(c, http.StatusInternalServerError, "บันทึกไม่สำเร็จ")
 	}
 }
 
-// putData (admin): นำเข้าเอกสารทั้งชุด — เขียนเฉพาะหมวดที่ต่างจากปัจจุบัน (ไม่ตรวจ If-Match; ใช้กับการนำเข้า/สคริปต์)
+// putData (admin): นำเข้าเอกสารทั้งชุด — เขียนเฉพาะส่วนที่ต่างจากปัจจุบัน (ไม่ตรวจ If-Match; ใช้กับการนำเข้า/สคริปต์)
 func (s *Server) putData(c *gin.Context) {
 	var raw json.RawMessage
 	if !decodeJSON(c, &raw, gamedata.MaxBytes+1, false) {
@@ -57,29 +59,38 @@ func (s *Server) putData(c *gin.Context) {
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
 	defer cancel()
-	ids, err := s.data.Replace(ctx, raw, c.Query("note"), userOf(c).ID)
+	res, err := s.data.Replace(ctx, raw, c.Query("note"), userOf(c).ID)
 	if err != nil {
 		dataErr(c, err, "บันทึกข้อมูลเกมล้มเหลว")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "saved", "versions": ids})
+	c.JSON(http.StatusOK, gin.H{"status": "saved", "versions": res.ConfigIDs, "rows": res.RowIDs})
 }
 
-// putCategory (admin): แก้ข้อมูลรายหมวด — ต้องส่ง If-Match = id เวอร์ชันของหมวดที่โหลดมา (ไม่ตรง = 409, ไม่ส่ง = 428)
+// ifMatchVersion อ่าน If-Match เป็นตัวเลขเวอร์ชัน; ok=false เมื่อไม่ส่งหรือผิดรูปแบบ (ตอบ 428/400 ให้แล้ว)
+func ifMatchVersion(c *gin.Context) (int64, bool) {
+	v := strings.Trim(c.GetHeader("If-Match"), `"`)
+	if v == "" {
+		writeErr(c, http.StatusPreconditionRequired, "ต้องส่ง If-Match เป็นเลขเวอร์ชันที่โหลดมา")
+		return 0, false
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 1 {
+		writeErr(c, http.StatusBadRequest, "If-Match ไม่ถูกต้อง")
+		return 0, false
+	}
+	return n, true
+}
+
+// putCategory (admin): แก้หมวดเอกสารทั้งหมวด — ต้องส่ง If-Match = id เวอร์ชันของหมวดที่โหลดมา (ไม่ตรง = 409, ไม่ส่ง = 428)
 func (s *Server) putCategory(c *gin.Context) {
 	cat := c.Param("category")
 	if gamedata.CategoryByName(cat) == nil {
 		writeErr(c, http.StatusNotFound, "ไม่มีหมวดข้อมูลนี้")
 		return
 	}
-	ifMatch := strings.Trim(c.GetHeader("If-Match"), `"`)
-	if ifMatch == "" {
-		writeErr(c, http.StatusPreconditionRequired, "ต้องส่ง If-Match เป็น id เวอร์ชันของหมวดที่โหลดมา")
-		return
-	}
-	want, err := strconv.ParseInt(ifMatch, 10, 64)
-	if err != nil || want < 1 {
-		writeErr(c, http.StatusBadRequest, "If-Match ไม่ถูกต้อง")
+	want, ok := ifMatchVersion(c)
+	if !ok {
 		return
 	}
 	var raw json.RawMessage
@@ -88,12 +99,12 @@ func (s *Server) putCategory(c *gin.Context) {
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
 	defer cancel()
-	ids, err := s.data.Apply(ctx, map[string][]byte{cat: raw}, map[string]int64{cat: want}, c.Query("note"), userOf(c).ID)
+	id, err := s.data.ApplyCategory(ctx, cat, raw, want, c.Query("note"), userOf(c).ID)
 	if err != nil {
 		dataErr(c, err, "บันทึกข้อมูลเกมล้มเหลว")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "saved", "category": cat, "version": ids[cat]})
+	c.JSON(http.StatusOK, gin.H{"status": "saved", "category": cat, "version": id})
 }
 
 func (s *Server) listVersions(c *gin.Context) {
@@ -131,12 +142,118 @@ func (s *Server) rollbackData(c *gin.Context) {
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
 	defer cancel()
-	nid, err := s.data.Rollback(ctx, c.Param("category"), id, userOf(c).ID)
+	nid, err := s.data.RollbackCategory(ctx, c.Param("category"), id, userOf(c).ID)
 	if err != nil {
 		dataErr(c, err, "ย้อนเวอร์ชันล้มเหลว")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "rolled-back", "category": c.Param("category"), "version": nid})
+}
+
+// ---- ตารางรายการ (classes/branches/skills/weapons/stats): แก้ทีละรายการ ----
+
+func tableParam(c *gin.Context) (string, string, bool) {
+	t, id := c.Param("table"), c.Param("id")
+	if gamedata.TableByName(t) == nil {
+		writeErr(c, http.StatusNotFound, "ไม่มีตารางข้อมูลนี้")
+		return "", "", false
+	}
+	if id == "" || len(id) > 64 {
+		writeErr(c, http.StatusBadRequest, "id ไม่ถูกต้อง")
+		return "", "", false
+	}
+	return t, id, true
+}
+
+// putItem (admin): สร้างหรือแก้รายการ — แก้ต้องส่ง If-Match = เวอร์ชันของแถวที่โหลดมา; สร้างต้องส่ง If-None-Match: *
+func (s *Server) putItem(c *gin.Context) {
+	table, id, ok := tableParam(c)
+	if !ok {
+		return
+	}
+	var expect int64
+	if c.GetHeader("If-None-Match") == "*" {
+		expect = 0
+	} else if expect, ok = ifMatchVersion(c); !ok {
+		return
+	}
+	var raw json.RawMessage
+	if !decodeJSON(c, &raw, 256<<10, false) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+	defer cancel()
+	v, err := s.data.ApplyItem(ctx, table, id, raw, expect, c.Query("note"), userOf(c).ID)
+	if err != nil {
+		dataErr(c, err, "บันทึกรายการล้มเหลว")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "saved", "table": table, "id": id, "version": v})
+}
+
+// deleteItem (admin): ลบรายการ — ต้องส่ง If-Match; ถ้ายังถูกรายการอื่นอ้างอิงอยู่ = 409
+func (s *Server) deleteItem(c *gin.Context) {
+	table, id, ok := tableParam(c)
+	if !ok {
+		return
+	}
+	want, ok := ifMatchVersion(c)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+	defer cancel()
+	if err := s.data.DeleteItem(ctx, table, id, want, c.Query("note"), userOf(c).ID); err != nil {
+		dataErr(c, err, "ลบรายการล้มเหลว")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "deleted", "table": table, "id": id})
+}
+
+func (s *Server) itemHistory(c *gin.Context) {
+	table, id, ok := tableParam(c)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+	es, err := s.db.ListAudit(ctx, table, id, 50)
+	if err != nil {
+		writeErr(c, http.StatusInternalServerError, "อ่านประวัติไม่สำเร็จ")
+		return
+	}
+	type entry struct {
+		ID        int64     `json:"id"`
+		Action    string    `json:"action"`
+		Note      string    `json:"note"`
+		By        *string   `json:"by"`
+		CreatedAt time.Time `json:"createdAt"`
+	}
+	out := make([]entry, len(es))
+	for i, e := range es {
+		out[i] = entry{e.ID, e.Action, e.Note, e.CreatedBy, e.CreatedAt}
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+func (s *Server) restoreItem(c *gin.Context) {
+	table, id, ok := tableParam(c)
+	if !ok {
+		return
+	}
+	aid, err := strconv.ParseInt(c.Param("auditId"), 10, 64)
+	if err != nil || aid < 1 {
+		writeErr(c, http.StatusBadRequest, "auditId ไม่ถูกต้อง")
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+	defer cancel()
+	v, err := s.data.RestoreItem(ctx, table, id, aid, userOf(c).ID)
+	if err != nil {
+		dataErr(c, err, "กู้คืนรายการล้มเหลว")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "restored", "table": table, "id": id, "version": v})
 }
 
 // ---------- ตัวละคร ----------

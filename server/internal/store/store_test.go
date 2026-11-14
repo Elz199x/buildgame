@@ -1,9 +1,11 @@
 package store_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +30,7 @@ func TestMigrateIsIdempotent(t *testing.T) {
 
 func TestUsersAndFirstAdmin(t *testing.T) {
 	db := storetest.New(t)
+	storetest.SeedGame(t, db)
 	ctx := context.Background()
 	u1, c1, err := db.CreateUserWithCharacter(ctx, "Alice", "hash1", true, nil, store.StateColumns{ClassID: "novice", BaseLv: 1, JobLv: 1})
 	if err != nil {
@@ -56,6 +59,7 @@ func TestUsersAndFirstAdmin(t *testing.T) {
 	}
 	// firstAdmin=false ห้ามได้ admin แม้เป็นคนแรก
 	db2 := storetest.New(t)
+	storetest.SeedGame(t, db2)
 	u3, _, err := db2.CreateUserWithCharacter(ctx, "carol", "h", false, nil, store.StateColumns{ClassID: "novice", BaseLv: 1, JobLv: 1})
 	if err != nil || u3.Role != "player" {
 		t.Fatalf("firstAdmin=false: %+v %v", u3, err)
@@ -64,6 +68,7 @@ func TestUsersAndFirstAdmin(t *testing.T) {
 
 func TestSessions(t *testing.T) {
 	db := storetest.New(t)
+	storetest.SeedGame(t, db)
 	ctx := context.Background()
 	u, _, _ := db.CreateUserWithCharacter(ctx, "dave", "h", false, nil, store.StateColumns{ClassID: "novice", BaseLv: 1, JobLv: 1})
 	hash := []byte("0123456789abcdef0123456789abcdef")
@@ -101,9 +106,10 @@ func TestSessions(t *testing.T) {
 
 func TestCharacterState(t *testing.T) {
 	db := storetest.New(t)
+	storetest.SeedGame(t, db)
 	ctx := context.Background()
 	u, c, _ := db.CreateUserWithCharacter(ctx, "erin", "h", false, nil, store.StateColumns{ClassID: "novice", BaseLv: 1, JobLv: 1})
-	state := json.RawMessage(`{"classId":"swordman","baseLv":50,"gold":1234,"learned":{"swBash":3}}`)
+	state := json.RawMessage(`{"classId":"swordman","baseLv":50,"gold":1234,"learned":{"swBash":3,"ghostSkill":2},"weaponId":"sword_1h"}`)
 	if err := db.SaveCharacterState(ctx, c.ID, state, store.StateColumns{ClassID: "swordman", BaseLv: 50, JobLv: 25, BaseExp: 10, JobExp: 5, Gold: 1234}); err != nil {
 		t.Fatal(err)
 	}
@@ -115,14 +121,30 @@ func TestCharacterState(t *testing.T) {
 		t.Fatalf("คอลัมน์ไม่ซิงก์: %+v", got)
 	}
 	var m map[string]any
-	if err := json.Unmarshal(got.State, &m); err != nil || m["classId"] != "swordman" {
+	if err := json.Unmarshal(got.State, &m); err != nil || m["classId"] != "swordman" || m["weaponId"] != "sword_1h" {
 		t.Fatalf("state: %s %v", got.State, err)
 	}
+	// สกิลที่เรียนอยู่ในตาราง character_skills (FK) ไม่ใช่ใน jsonb; สกิลที่ไม่มีในเกมถูกข้าม และประกอบกลับเข้า state ตอนอ่าน
+	var nSkills int64
+	if err := db.DB().Raw(`SELECT count(*) FROM character_skills WHERE character_id = ?`, c.ID).Scan(&nSkills).Error; err != nil || nSkills != 1 {
+		t.Fatalf("character_skills ต้องมี 1 แถว (swBash) ได้ %d %v", nSkills, err)
+	}
+	if l, _ := m["learned"].(map[string]any); len(l) != 1 || l["swBash"] != float64(3) {
+		t.Fatalf("learned ที่ประกอบกลับ: %v", m["learned"])
+	}
+	var raw struct{ State string }
+	if err := db.DB().Raw(`SELECT state::text AS state FROM characters WHERE id = ?`, c.ID).Scan(&raw).Error; err != nil || strings.Contains(raw.State, "learned") || strings.Contains(raw.State, "classId") {
+		t.Fatalf("state ใน DB ต้องไม่เก็บคีย์ที่ซ้ำกับคอลัมน์/ตารางลูก: %s %v", raw.State, err)
+	}
+	// อาชีพถูกอ้างโดยตัวละคร ลบไม่ได้
+	if _, err := db.SaveGameData(ctx, store.SaveInput{Ops: []store.TableOp{{Table: "classes", ID: "swordman", Delete: true}}}, nil); !errors.Is(err, store.ErrRefIntegrity) {
+		t.Fatalf("ลบอาชีพที่มีตัวละครใช้ต้อง ErrRefIntegrity ได้ %v", err)
+	}
 	// ข้อจำกัดของฐานข้อมูลต้องกันค่าผิด (gold ติดลบ)
-	if err := db.SaveCharacterState(ctx, c.ID, state, store.StateColumns{ClassID: "x", BaseLv: 1, JobLv: 1, Gold: -5}); err == nil {
+	if err := db.SaveCharacterState(ctx, c.ID, state, store.StateColumns{ClassID: "novice", BaseLv: 1, JobLv: 1, Gold: -5}); err == nil {
 		t.Fatal("gold ติดลบต้องถูกปฏิเสธโดย CHECK constraint")
 	}
-	if err := db.SaveCharacterState(ctx, "00000000-0000-0000-0000-000000000000", state, store.StateColumns{ClassID: "x", BaseLv: 1, JobLv: 1}); !errors.Is(err, store.ErrNotFound) {
+	if err := db.SaveCharacterState(ctx, "00000000-0000-0000-0000-000000000000", state, store.StateColumns{ClassID: "novice", BaseLv: 1, JobLv: 1}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("ไม่พบตัวละครต้องได้ ErrNotFound: %v", err)
 	}
 	if err := db.SaveCharacterPosition(ctx, c.ID, "map_prontera", 700, 800); err != nil {
@@ -134,73 +156,145 @@ func TestCharacterState(t *testing.T) {
 	}
 }
 
-func TestGameConfigVersions(t *testing.T) {
-	db := storetest.New(t)
-	ctx := context.Background()
-	if _, err := db.ActiveGameConfig(ctx); !errors.Is(err, store.ErrNotFound) {
-		t.Fatal("ตารางว่างต้องได้ ErrNotFound")
-	}
-	split, err := gamedata.SplitDoc(gamedata.Seed())
+func seedParts(t *testing.T) (map[string][]byte, map[string][]json.RawMessage) {
+	t.Helper()
+	cfg, tables, err := gamedata.SplitDoc(gamedata.Seed())
 	if err != nil {
 		t.Fatal(err)
 	}
-	seed := map[string][]byte{}
-	for k, v := range split {
-		seed[k] = v
+	out := map[string][]byte{}
+	for k, v := range cfg {
+		out[k] = v
 	}
-	if err := db.SeedGameConfigIfEmpty(ctx, seed); err != nil {
+	return out, tables
+}
+
+func TestGameData(t *testing.T) {
+	db := storetest.New(t)
+	ctx := context.Background()
+	if _, _, err := db.ActiveGameData(ctx); !errors.Is(err, store.ErrNotFound) {
+		t.Fatal("ตารางว่างต้องได้ ErrNotFound")
+	}
+	cfg, tables := seedParts(t)
+	if err := db.SeedGameDataIfEmpty(ctx, cfg, tables); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SeedGameConfigIfEmpty(ctx, seed); err != nil { // ซ้ำต้องไม่เพิ่มแถว
+	if err := db.SeedGameDataIfEmpty(ctx, cfg, tables); err != nil { // ซ้ำต้องไม่เพิ่มแถว
 		t.Fatal(err)
 	}
-	active, err := db.ActiveGameConfig(ctx)
+	active, rows, err := db.ActiveGameData(ctx)
 	if err != nil || len(active) != len(gamedata.Categories) {
-		t.Fatalf("ต้องมีครบทุกหมวด: %d %v", len(active), err)
+		t.Fatalf("ต้องมีครบทุกหมวดเอกสาร: %d %v", len(active), err)
+	}
+	for _, tb := range gamedata.Tables {
+		if len(rows[tb.Name]) != len(tables[tb.Name]) || len(rows[tb.Name]) == 0 {
+			t.Fatalf("ตาราง %s ต้องมีครบทุกรายการ: %d/%d", tb.Name, len(rows[tb.Name]), len(tables[tb.Name]))
+		}
 	}
 	parts := map[string][]byte{}
 	for k, r := range active {
 		parts[k] = r.Data
 	}
-	raw, _ := gamedata.ComposeDoc(parts)
-	if _, err := gamedata.Parse(raw); err != nil {
-		t.Fatalf("ข้อมูลที่ประกอบกลับจาก JSONB ต้อง parse ได้: %v", err)
+	items := map[string][]json.RawMessage{}
+	for k, rs := range rows {
+		for _, r := range rs {
+			items[k] = append(items[k], r.Data)
+		}
 	}
-	all, _ := db.ListGameConfigVersions(ctx, "", 100)
-	if len(all) != len(gamedata.Categories) {
-		t.Fatalf("seed ต้องได้หมวดละ 1 เวอร์ชัน ได้ %d", len(all))
+	raw, _ := gamedata.ComposeDoc(parts, items)
+	if _, err := gamedata.Parse(raw); err != nil {
+		t.Fatalf("ข้อมูลที่ประกอบกลับจาก DB ต้อง parse ได้: %v", err)
 	}
 
-	// เขียนเฉพาะหมวดที่แก้ + ตรวจ If-Match
+	// ---- หมวดเอกสาร: If-Match / validate / เก็บ 50 เวอร์ชัน ----
 	w1 := active["world"].ID
-	ids, err := db.SaveGameConfig(ctx, map[string][]byte{"world": active["world"].Data}, map[string]int64{"world": w1}, "edit", "", nil)
-	if err != nil || len(ids) != 1 || ids["world"] <= w1 {
-		t.Fatalf("save: %v %v", ids, err)
+	res, err := db.SaveGameData(ctx, store.SaveInput{Config: map[string][]byte{"world": active["world"].Data}, ConfigExpect: map[string]int64{"world": w1}, Note: "edit"}, nil)
+	if err != nil || res.ConfigIDs["world"] <= w1 {
+		t.Fatalf("save: %v %v", res, err)
 	}
-	if _, err := db.SaveGameConfig(ctx, map[string][]byte{"world": active["world"].Data}, map[string]int64{"world": w1}, "stale", "", nil); !errors.Is(err, store.ErrConfigConflict) {
+	if _, err := db.SaveGameData(ctx, store.SaveInput{Config: map[string][]byte{"world": active["world"].Data}, ConfigExpect: map[string]int64{"world": w1}}, nil); !errors.Is(err, store.ErrConfigConflict) {
 		t.Fatalf("expect เก่าต้อง ErrConfigConflict ได้ %v", err)
 	}
-	// validate ไม่ผ่านต้องไม่บันทึกอะไร
-	before, _ := db.ListGameConfigVersions(ctx, "", 1000)
 	bad := errors.New("ไม่สอดคล้อง")
-	if _, err := db.SaveGameConfig(ctx, map[string][]byte{"balance": active["balance"].Data}, nil, "x", "", func(map[string][]byte) error { return bad }); !errors.Is(err, bad) {
+	before, _ := db.ListGameConfigVersions(ctx, "", 1000)
+	if _, err := db.SaveGameData(ctx, store.SaveInput{Config: map[string][]byte{"balance": active["balance"].Data}}, func(map[string][]byte, map[string][]json.RawMessage) error { return bad }); !errors.Is(err, bad) {
 		t.Fatalf("ต้องคืน error จาก validate ได้ %v", err)
 	}
 	if after, _ := db.ListGameConfigVersions(ctx, "", 1000); len(after) != len(before) {
 		t.Fatal("validate ล้มเหลวห้ามเพิ่มแถว")
 	}
-	if _, err := db.GameConfigVersion(ctx, "balance", w1); !errors.Is(err, store.ErrNotFound) {
-		t.Fatal("เวอร์ชันของหมวดอื่นต้องไม่พบ")
-	}
-	// เก็บเพียง 50 เวอร์ชันล่าสุดต่อหมวด และไม่กระทบหมวดอื่น
 	for i := 0; i < 55; i++ {
-		if _, err := db.SaveGameConfig(ctx, map[string][]byte{"world": active["world"].Data}, nil, "bulk", "", nil); err != nil {
+		if _, err := db.SaveGameData(ctx, store.SaveInput{Config: map[string][]byte{"world": active["world"].Data}, Note: "bulk"}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if vs, _ := db.ListGameConfigVersions(ctx, "world", 200); len(vs) != 50 {
 		t.Fatalf("world ต้องเหลือ 50 เวอร์ชัน ได้ %d", len(vs))
 	}
+
+	// ---- ตารางรายการ: version ต่อแถว, FK, ประวัติ ----
+	var bash store.TableRow
+	for _, r := range rows["skills"] {
+		if r.ID == "swBash" {
+			bash = r
+		}
+	}
+	if bash.ID == "" || bash.Version != 1 {
+		t.Fatalf("ต้องมีสกิล swBash เวอร์ชัน 1: %+v", bash)
+	}
+	rename := func(name string) []byte {
+		var m map[string]any
+		_ = json.Unmarshal(bash.Data, &m)
+		m["name"] = name
+		b, _ := json.Marshal(m)
+		return b
+	}
+	one := int64(1)
+	res, err = db.SaveGameData(ctx, store.SaveInput{Ops: []store.TableOp{{Table: "skills", ID: "swBash", Data: rename("ทดสอบ"), Expect: &one}}, Note: "rename"}, nil)
+	if err != nil || res.RowIDs["skills/swBash"] != 2 {
+		t.Fatalf("แก้สกิลต้องได้เวอร์ชัน 2: %v %v", res.RowIDs, err)
+	}
+	if _, err := db.SaveGameData(ctx, store.SaveInput{Ops: []store.TableOp{{Table: "skills", ID: "swBash", Data: rename("อื่น"), Expect: &one}}}, nil); !errors.Is(err, store.ErrConfigConflict) {
+		t.Fatalf("If-Match เก่าต้อง ErrConfigConflict ได้ %v", err)
+	}
+	res, err = db.SaveGameData(ctx, store.SaveInput{Ops: []store.TableOp{{Table: "skills", ID: "swBash", Data: rename("ทดสอบ")}}}, nil)
+	if err != nil || res.RowIDs["skills/swBash"] != 2 {
+		t.Fatalf("ข้อมูลเหมือนเดิมต้องไม่เพิ่มเวอร์ชัน: %v %v", res.RowIDs, err)
+	}
+	// FK: สกิลชี้อาชีพที่ไม่มี / ลบอาชีพที่ยังมีสกิล
+	var ghost map[string]any
+	_ = json.Unmarshal(bash.Data, &ghost)
+	ghost["id"], ghost["class"] = "zzGhost", "no_such_class"
+	gb, _ := json.Marshal(ghost)
+	zero := int64(0)
+	if _, err := db.SaveGameData(ctx, store.SaveInput{Ops: []store.TableOp{{Table: "skills", ID: "zzGhost", Data: gb, Expect: &zero}}}, nil); !errors.Is(err, store.ErrRefIntegrity) {
+		t.Fatalf("สกิลที่ชี้อาชีพไม่มีต้อง ErrRefIntegrity ได้ %v", err)
+	}
+	if _, err := db.SaveGameData(ctx, store.SaveInput{Ops: []store.TableOp{{Table: "classes", ID: "swordman", Delete: true}}}, nil); !errors.Is(err, store.ErrRefIntegrity) {
+		t.Fatalf("ลบอาชีพที่ยังมีสกิลต้อง ErrRefIntegrity ได้ %v", err)
+	}
+	// สร้าง (ต้องยังไม่มี) แล้วสร้างซ้ำ = ชน แล้วลบ
+	ghost["class"] = "swordman"
+	gb, _ = json.Marshal(ghost)
+	if _, err := db.SaveGameData(ctx, store.SaveInput{Ops: []store.TableOp{{Table: "skills", ID: "zzGhost", Data: gb, Expect: &zero}}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SaveGameData(ctx, store.SaveInput{Ops: []store.TableOp{{Table: "skills", ID: "zzGhost", Data: gb, Expect: &zero}}}, nil); !errors.Is(err, store.ErrConfigConflict) {
+		t.Fatalf("สร้างซ้ำต้อง ErrConfigConflict ได้ %v", err)
+	}
+	if _, err := db.SaveGameData(ctx, store.SaveInput{Ops: []store.TableOp{{Table: "skills", ID: "zzGhost", Delete: true}}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	// ประวัติ: swBash มี create (seed) + update และกู้สถานะเดิมได้
+	hist, err := db.ListAudit(ctx, "skills", "swBash", 10)
+	if err != nil || len(hist) != 2 || hist[0].Action != "update" || hist[1].Action != "create" {
+		t.Fatalf("ประวัติ swBash: %+v %v", hist, err)
+	}
+	snap, err := db.AuditSnapshot(ctx, "skills", "swBash", hist[1].ID)
+	if err != nil || !bytes.Contains(bytes.ReplaceAll(snap, []byte(" "), nil), []byte(`"id":"swBash"`)) {
+		t.Fatalf("AuditSnapshot: %s %v", snap, err)
+	}
+	// หมวดเอกสารไม่ถูกกระทบจากการแก้ตาราง
 	if vs, _ := db.ListGameConfigVersions(ctx, "balance", 200); len(vs) != 1 {
 		t.Fatalf("balance ต้องไม่ถูกกระทบ ได้ %d", len(vs))
 	}

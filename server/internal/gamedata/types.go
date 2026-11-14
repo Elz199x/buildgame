@@ -1,5 +1,5 @@
 // Package gamedata คือโครงสร้างข้อมูลเกม (คลาส สกิล อาวุธ มอนสเตอร์ แมพ ฯลฯ) ที่ถอดจาก JSON
-// ซึ่งเก็บเป็นเอกสาร JSONB ใน Postgres (ตาราง game_data_versions) — ตัวแก้ไขในหน้าเว็บอ่าน/เขียนเอกสารเดียวกันนี้
+// ซึ่งเก็บเป็นเอกสาร JSONB ใน Postgres (ตาราง game_config_versions + ตารางรายการ game_*) — ตัวแก้ไขในหน้าเว็บอ่าน/เขียนเอกสารเดียวกันนี้
 //
 // ตรงกับสคีมาใน docs/DATA_SCHEMA.md; ฟิลด์ที่ไม่รู้จักถูกข้าม (ยังคงอยู่ใน JSON ดิบ)
 package gamedata
@@ -103,6 +103,7 @@ type Class struct {
 	Parent         string `json:"parent"`
 	JobLvCap       int    `json:"jobLvCap"`
 	PointsPerJobLv int    `json:"pointsPerJobLv"`
+	Desc           string `json:"desc"`
 }
 
 type Branch struct {

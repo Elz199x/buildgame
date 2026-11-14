@@ -72,9 +72,21 @@ func (s *Store) CreateUserWithCharacter(ctx context.Context, username, passwordH
 		if len(stateJSON) == 0 {
 			stateJSON = []byte("{}")
 		}
-		c = Character{UserID: u.ID, Name: username, ClassID: cols.ClassID, BaseLv: cols.BaseLv, JobLv: cols.JobLv,
-			BaseExp: cols.BaseExp, JobExp: cols.JobExp, Gold: cols.Gold, MapID: "map_prontera", PosX: 520, PosY: 850, State: stateJSON, Mode: "game"}
-		return tx.Create(&c).Error
+		classID, err := lookupID(tx, "game_classes", cols.ClassID, "อาชีพ")
+		if err != nil {
+			return err
+		}
+		rest, learned, err := splitState(stateJSON)
+		if err != nil {
+			return err
+		}
+		c = Character{UserID: u.ID, Name: username, ClassRef: classID, BaseLv: cols.BaseLv, JobLv: cols.JobLv,
+			BaseExp: cols.BaseExp, JobExp: cols.JobExp, Gold: cols.Gold, MapID: "map_prontera", PosX: 520, PosY: 850, State: rest, Mode: "game"}
+		if err := tx.Create(&c).Error; err != nil {
+			return err
+		}
+		c.ClassID, c.State = cols.ClassID, stateJSON
+		return syncLearned(tx, c.ID, learned)
 	})
 	if err != nil {
 		if isUnique(err) {

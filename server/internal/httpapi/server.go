@@ -103,6 +103,12 @@ func (s *Server) Handler() http.Handler {
 	adm.GET("/versions", s.listVersions)
 	adm.POST("/rollback/:category/:id", s.rollbackData)
 
+	tbl := api.Group("/tables", s.requireAdmin)
+	tbl.PUT("/:table/:id", s.putItem)
+	tbl.DELETE("/:table/:id", s.deleteItem)
+	tbl.GET("/:table/:id/history", s.itemHistory)
+	tbl.POST("/:table/:id/restore/:auditId", s.restoreItem)
+
 	ch := api.Group("/characters/me")
 	ch.GET("", s.getCharacter)
 	ch.PUT("/state", s.putCharacterState) // โหมด lab เท่านั้น

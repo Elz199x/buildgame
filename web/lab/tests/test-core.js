@@ -136,38 +136,64 @@ check(SL.state.withdrawFromStorage('etc_jellopy', 2) === true && SL.state.getQty
 const wCalc = SL.state.calcWeight();
 check(wCalc && wCalc.cur > 0 && wCalc.max >= 2000, 'ro-weight: คำนวณน้ำหนักไอเทมในกระเป๋าเทียบกับน้ำหนักสูงสุดตามค่า STR ของตัวละครได้');
 
-/* 13) บันทึกข้อมูลเกมแยกหมวด: ส่งเฉพาะหมวดที่เปลี่ยน พร้อม If-Match; 409 = ไม่ทับ แต่โหลดค่าล่าสุด */
+/* 13) บันทึกข้อมูลเกม: หมวดเอกสารส่งทั้งหมวด / ตารางรายการส่งทีละรายการ พร้อม If-Match; 409 = ไม่ทับ แต่โหลดค่าล่าสุด */
 (async () => {
   const seed = JSON.parse(fs.readFileSync(require('../tools/lab-env').SEED, 'utf8'));
-  const cats = { balance: ['formulaConfig', 'globals', 'rules'], content: ['version', 'classes', 'branches', 'skills', 'weapons', 'statDefs'], entities: ['monsters', 'equipItems', 'elementSystem'], world: ['worldMap'], tools: ['presets', 'builds', 'modelSlots'] };
-  global.__SL_REMOTE_DATA = Object.assign({}, clone(seed), { _meta: { versions: { balance: 11, content: 12, entities: 13, world: 14, tools: 15 }, categories: cats } });
+  const cats = { balance: ['version', 'formulaConfig', 'globals', 'rules'], entities: ['monsters', 'equipItems', 'elementSystem'], world: ['worldMap'], tools: ['presets', 'builds', 'modelSlots'] };
+  const tableKeys = { classes: 'classes', branches: 'branches', skills: 'skills', weapons: 'weapons', stats: 'statDefs' };
+  const tableOrder = ['classes', 'branches', 'skills', 'weapons', 'stats'];
+  const tables = {}; tableOrder.forEach(t => { tables[t] = {}; seed[tableKeys[t]].forEach(it => { tables[t][it.id] = 7; }); });
+  const meta = (balanceVer) => ({ versions: { balance: balanceVer, entities: 13, world: 14, tools: 15 }, categories: cats, tables: tables, tableKeys: tableKeys, tableOrder: tableOrder });
+  global.__SL_REMOTE_DATA = Object.assign({}, clone(seed), { _meta: meta(11) });
   global.__SL_USER = { role: 'admin' };
   const calls = []; let mode = 'ok', nextVer = 100;
   global.fetch = (url, opt) => {
-    calls.push({ url, method: (opt && opt.method) || 'GET', ifMatch: opt && opt.headers && opt.headers['If-Match'], body: opt && opt.body });
-    if (opt && opt.method === 'PUT') {
-      if (mode === '409') return Promise.resolve({ status: 409, ok: false, json: () => Promise.resolve({}) });
+    calls.push({ url, method: (opt && opt.method) || 'GET', ifMatch: opt && opt.headers && opt.headers['If-Match'], ifNone: opt && opt.headers && opt.headers['If-None-Match'], body: opt && opt.body });
+    if (opt && (opt.method === 'PUT' || opt.method === 'DELETE')) {
+      if (mode === '409') return Promise.resolve({ status: 409, ok: false, json: () => Promise.resolve({ error: 'conflict' }) });
       return Promise.resolve({ status: 200, ok: true, json: () => Promise.resolve({ version: nextVer++ }) });
     }
-    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(Object.assign({}, clone(seed), { _meta: { versions: { balance: 200, content: 12, entities: 13, world: 14, tools: 15 }, categories: cats } })) });
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(Object.assign({}, clone(seed), { _meta: meta(200) })) });
   };
   SL.loadAll();
   const wait = ms => new Promise(r => setTimeout(r, ms));
+  const isData = c => (c.method === 'PUT' || c.method === 'DELETE') && (c.url.indexOf('/api/data/') >= 0 || c.url.indexOf('/api/tables/') >= 0);
+
+  // หมวดเอกสาร: แก้ globals → ส่งเฉพาะ balance หมวดเดียว
   SL.store.change(d => { d.globals.aspdCap = d.globals.aspdCap - 1; });
   await wait(1200);
-  const isData = c => c.method === 'PUT' && c.url.indexOf("/api/data/") >= 0; const puts = calls.filter(isData);
-  check(puts.length === 1 && /\/api\/data\/balance\?/.test(puts[0].url), 'save รายหมวด: แก้ globals ต้องส่งเฉพาะหมวด balance หมวดเดียว');
-  check(puts[0] && puts[0].ifMatch === '11', 'save รายหมวด: ต้องส่ง If-Match เป็นเวอร์ชันของหมวดที่โหลดมา');
-  check(puts[0] && JSON.stringify(Object.keys(JSON.parse(puts[0].body)).sort()) === JSON.stringify(cats.balance.slice().sort()), 'save รายหมวด: body มีเฉพาะคีย์ของหมวด');
+  let puts = calls.filter(isData);
+  check(puts.length === 1 && /\/api\/data\/balance\?/.test(puts[0].url), 'save: แก้ globals ต้องส่งเฉพาะหมวด balance หมวดเดียว');
+  check(puts[0] && puts[0].ifMatch === '11', 'save: หมวดเอกสารต้องส่ง If-Match เป็นเวอร์ชันของหมวดที่โหลดมา');
+  check(puts[0] && JSON.stringify(Object.keys(JSON.parse(puts[0].body)).sort()) === JSON.stringify(cats.balance.slice().sort()), 'save: body ของหมวดมีเฉพาะคีย์ของหมวด');
+
+  // ตารางรายการ: แก้สกิลตัวเดียว → ส่ง PUT รายการนั้นรายการเดียว (ไม่ส่งทั้ง 70 สกิล)
   calls.length = 0;
-  SL.store.change(d => { d.globals.aspdCap = d.globals.aspdCap - 1; });
+  const sid = seed.skills[0].id;
+  SL.store.change(d => { d.skills.find(s => s.id === sid).name = 'แก้ชื่อทดสอบ'; });
   await wait(1200);
-  check(calls.filter(isData).length === 1 && calls.find(isData).ifMatch === '100', 'save รายหมวด: บันทึกครั้งถัดไปใช้เวอร์ชันที่เซิร์ฟเวอร์ตอบกลับ');
+  puts = calls.filter(isData);
+  check(puts.length === 1 && puts[0].method === 'PUT' && puts[0].url.indexOf('/api/tables/skills/' + encodeURIComponent(sid)) >= 0, 'save: แก้สกิลหนึ่งตัวต้องส่งเฉพาะสกิลนั้น');
+  check(puts[0] && puts[0].ifMatch === '7' && JSON.parse(puts[0].body).name === 'แก้ชื่อทดสอบ', 'save: รายการต้องส่ง If-Match เป็นเวอร์ชันของแถว');
+
+  // สร้างสกิลใหม่ → If-None-Match: *  /  ลบ → DELETE พร้อม If-Match
+  calls.length = 0;
+  SL.store.change(d => { const c = clone(d.skills.find(s => s.id === sid)); c.id = 'zzNewSkill'; d.skills.push(c); });
+  await wait(1200);
+  puts = calls.filter(isData);
+  check(puts.length === 1 && puts[0].ifNone === '*' && puts[0].url.indexOf('/api/tables/skills/zzNewSkill') >= 0, 'save: สกิลใหม่ต้องส่ง If-None-Match: *');
+  calls.length = 0;
+  SL.store.change(d => { d.skills = d.skills.filter(s => s.id !== 'zzNewSkill'); });
+  await wait(1200);
+  puts = calls.filter(isData);
+  check(puts.length === 1 && puts[0].method === 'DELETE' && puts[0].ifMatch === '100', 'save: ลบสกิลต้องส่ง DELETE พร้อม If-Match เป็นเวอร์ชันที่เซิร์ฟเวอร์ตอบกลับตอนสร้าง');
+
+  // 409: ไม่ทับ แต่โหลดค่าล่าสุดจากเซิร์ฟเวอร์
   calls.length = 0; mode = '409';
-  SL.store.change(d => { d.globals.aspdCap = d.globals.aspdCap - 1; });
+  SL.store.change(d => { d.skills.find(s => s.id === sid).name = 'ชื่อที่จะชน'; });
   await wait(1200);
-  check(calls.some(c => c.method === 'GET' && /\/api\/data$/.test(c.url)), 'save รายหมวด: 409 ต้องโหลดค่าล่าสุดจากเซิร์ฟเวอร์ ไม่ทับ');
-  check(SL.store.get().globals.aspdCap === seed.globals.aspdCap, 'save รายหมวด: หลัง 409 ข้อมูลต้องเป็นค่าของเซิร์ฟเวอร์');
+  check(calls.some(c => c.method === 'GET' && /\/api\/data$/.test(c.url)), 'save: 409 ต้องโหลดค่าล่าสุดจากเซิร์ฟเวอร์ ไม่ทับ');
+  check(SL.store.get().skills.find(s => s.id === sid).name === seed.skills[0].name, 'save: หลัง 409 ข้อมูลต้องเป็นค่าของเซิร์ฟเวอร์');
   delete global.__SL_USER;
 
   console.log(fail ? '\n' + fail + ' CHECK(S) FAILED' : '\nALL CHECKS PASSED');

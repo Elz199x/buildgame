@@ -46,20 +46,30 @@
   /* ---------------- DATA ---------------- */
   let DATA = null;
   const dataListeners = [];
-  // ข้อมูลเกมแยกเป็นหมวดใน DB (balance/content/entities/world/tools) — เซิร์ฟเวอร์ส่ง _meta มาให้ (เวอร์ชันของแต่ละหมวด + คีย์ในหมวด)
-  // ไคลเอนต์ส่งแก้เฉพาะหมวดที่เปลี่ยนจริง พร้อม If-Match เพื่อไม่ทับงานของแอดมินคนอื่น (ไม่ฝังรายชื่อหมวดในโค้ดฝั่งนี้)
-  let META = { versions: {}, categories: {} };
+  // ข้อมูลเกมใน DB มี 2 ชนิด — เซิร์ฟเวอร์ส่ง _meta มาให้ (ไม่ฝังรายชื่อในโค้ดฝั่งนี้):
+  //   - หมวดเอกสาร (balance/entities/world/tools): META.versions[หมวด], META.categories[หมวด] = คีย์ในเอกสาร
+  //   - ตารางรายการ (classes/branches/skills/weapons/stats): META.tables[ตาราง][id] = เวอร์ชันของแถว, META.tableKeys, META.tableOrder (ลำดับพึ่งพา)
+  // ไคลเอนต์ส่งแก้เฉพาะสิ่งที่เปลี่ยนจริง (หมวดเดียว / สกิลทีละตัว) พร้อม If-Match เพื่อไม่ทับงานของแอดมินคนอื่น
+  let META = { versions: {}, categories: {}, tables: {}, tableKeys: {}, tableOrder: [] };
+  let SYNCED_T = {};                     // ตาราง -> { id -> JSON ของรายการ ณ ครั้งล่าสุดที่ตรงกับเซิร์ฟเวอร์ }
   let SYNCED = {};                       // หมวด -> JSON ของหมวดนั้น ณ ครั้งล่าสุดที่ตรงกับเซิร์ฟเวอร์
   const apiOpt = { credentials: 'include' };
   function partJSON(d, cat){
     const o = {}; (META.categories[cat] || []).forEach(k => { if(d[k] !== undefined) o[k] = d[k]; });
     return JSON.stringify(o);
   }
-  function snapshotSynced(){ SYNCED = {}; Object.keys(META.categories).forEach(c => { SYNCED[c] = partJSON(DATA, c); }); }
+  function tableState(d, t){
+    const m = {}; (d[META.tableKeys[t]] || []).forEach(it => { if(it && it.id) m[it.id] = JSON.stringify(it); });
+    return m;
+  }
+  function snapshotSynced(){
+    SYNCED = {}; Object.keys(META.categories).forEach(c => { SYNCED[c] = partJSON(DATA, c); });
+    SYNCED_T = {}; META.tableOrder.forEach(t => { SYNCED_T[t] = tableState(DATA, t); });
+  }
   // รับเอกสารข้อมูลเกมจากเซิร์ฟเวอร์ (มี _meta) เป็นข้อมูลปัจจุบัน
   function adopt(doc){
     const d = clone(doc); const meta = d._meta; delete d._meta;
-    META = meta && meta.versions && meta.categories ? meta : { versions: {}, categories: {} };
+    META = meta && meta.versions && meta.categories ? Object.assign({ tables: {}, tableKeys: {}, tableOrder: [] }, meta) : { versions: {}, categories: {}, tables: {}, tableKeys: {}, tableOrder: [] };
     DATA = normalizeData(d);
     snapshotSynced();
     return DATA;
@@ -85,6 +95,41 @@
       return r.json().then(j => { META.versions[cat] = j.version; SYNCED[cat] = body; });
     });
   }
+  function reportFail(r, what){
+    return r.json().catch(() => ({})).then(j => { const msg = (j && j.error) || (what + ' ไม่สำเร็จ (' + r.status + ')'); console.warn('[Go server]', msg); if(SL.ui && SL.ui.toast) SL.ui.toast(msg); });
+  }
+  function conflict(r, what){
+    // มีแอดมินคนอื่นแก้ไปก่อน หรือผิดความสัมพันธ์ → ไม่ทับ: โหลดค่าล่าสุดมาแทน (การแก้ที่ยังไม่ได้บันทึกของรายการนั้นจะหายไป)
+    return r.json().catch(() => ({})).then(j => refreshFromServer().then(() => { if(SL.ui && SL.ui.toast) SL.ui.toast((j && j.error) || (what + ' ถูกแก้โดยผู้อื่นก่อนหน้า — โหลดค่าล่าสุดแล้ว')); }));
+  }
+  function putItem(t, id){
+    const body = tableState(DATA, t)[id]; const exists = SYNCED_T[t] && SYNCED_T[t][id] !== undefined;
+    const headers = { 'Content-Type': 'application/json' };
+    if(exists) headers['If-Match'] = String((META.tables[t] || {})[id]); else headers['If-None-Match'] = '*';
+    return fetch(g.__SL_REMOTE_API + '/api/tables/' + encodeURIComponent(t) + '/' + encodeURIComponent(id) + '?note=web+editor', { method: 'PUT', credentials: 'include', headers: headers, body: body }).then(r => {
+      if(r.status === 409) return conflict(r, t + '/' + id);
+      if(!r.ok) return reportFail(r, 'บันทึก ' + t + '/' + id);
+      return r.json().then(j => { (META.tables[t] = META.tables[t] || {})[id] = j.version; SYNCED_T[t][id] = body; });
+    });
+  }
+  function deleteItem(t, id){
+    return fetch(g.__SL_REMOTE_API + '/api/tables/' + encodeURIComponent(t) + '/' + encodeURIComponent(id) + '?note=web+editor', { method: 'DELETE', credentials: 'include', headers: { 'If-Match': String((META.tables[t] || {})[id]) } }).then(r => {
+      if(r.status === 409) return conflict(r, t + '/' + id);
+      if(r.status === 404){ delete SYNCED_T[t][id]; return; }
+      if(!r.ok) return reportFail(r, 'ลบ ' + t + '/' + id);
+      delete SYNCED_T[t][id]; if(META.tables[t]) delete META.tables[t][id];
+    });
+  }
+  // ลบก่อน (ตารางท้ายลำดับพึ่งพาก่อน) แล้วสร้าง/แก้ตามลำดับพึ่งพา — ให้ FOREIGN KEY ผ่าน
+  function dirtyTableOps(){
+    const dels = [], puts = [];
+    META.tableOrder.forEach(t => {
+      const cur = tableState(DATA, t), old = SYNCED_T[t] || {};
+      Object.keys(old).forEach(id => { if(cur[id] === undefined) dels.unshift(() => deleteItem(t, id)); });
+      Object.keys(cur).forEach(id => { if(cur[id] !== old[id]) puts.push(() => putItem(t, id)); });
+    });
+    return dels.concat(puts);
+  }
   let remoteTimer = 0, saveChain = Promise.resolve();
   function saveRemote(){
     if(typeof fetch !== 'function') return;
@@ -93,8 +138,8 @@
       // ข้อมูลเกมเป็นของส่วนกลาง: เซิร์ฟเวอร์ให้เฉพาะ admin แก้ได้ (ผู้เล่นทั่วไปแก้ได้ในเครื่องเฉพาะเซสชันนี้)
       if(!g.__SL_USER || g.__SL_USER.role !== 'admin') return;
       saveChain = saveChain.then(() => {
-        const dirty = Object.keys(META.categories).filter(c => partJSON(DATA, c) !== SYNCED[c]);
-        return dirty.reduce((p, c) => p.then(() => putCategory(c)), Promise.resolve());
+        const jobs = dirtyTableOps().concat(Object.keys(META.categories).filter(c => partJSON(DATA, c) !== SYNCED[c]).map(c => () => putCategory(c)));
+        return jobs.reduce((p, job) => p.then(job), Promise.resolve());
       }).catch(() => {});
     }, 800);
   }
@@ -108,6 +153,16 @@
   function rollbackTo(category, id){
     return fetch(g.__SL_REMOTE_API + '/api/data/rollback/' + encodeURIComponent(category) + '/' + encodeURIComponent(id), Object.assign({ method: 'POST' }, apiOpt))
       .then(r => { if(!r.ok) return r.json().catch(() => ({})).then(j => { throw new Error((j && j.error) || ('ย้อนเวอร์ชันไม่สำเร็จ (' + r.status + ')')); }); return refreshFromServer(); })
+      .then(() => true);
+  }
+  // ประวัติการแก้ของรายการหนึ่งในตาราง (ใหม่→เก่า) และกู้รายการไปเป็นสถานะตามบรรทัดประวัติ (แอดมินเท่านั้น)
+  function itemHistory(table, id){
+    return fetch(g.__SL_REMOTE_API + '/api/tables/' + encodeURIComponent(table) + '/' + encodeURIComponent(id) + '/history', apiOpt)
+      .then(r => { if(!r.ok) throw new Error('อ่านประวัติรายการไม่สำเร็จ (' + r.status + ') — ต้องเป็นแอดมิน'); return r.json(); });
+  }
+  function restoreItem(table, id, auditId){
+    return fetch(g.__SL_REMOTE_API + '/api/tables/' + encodeURIComponent(table) + '/' + encodeURIComponent(id) + '/restore/' + encodeURIComponent(auditId), Object.assign({ method: 'POST' }, apiOpt))
+      .then(r => { if(!r.ok) return r.json().catch(() => ({})).then(j => { throw new Error((j && j.error) || ('กู้คืนไม่สำเร็จ (' + r.status + ')')); }); return refreshFromServer(); })
       .then(() => true);
   }
   function emitData(reason){ dataListeners.slice().forEach(fn => { try{ fn(reason); }catch(e){ console.error(e); } }); }
@@ -127,6 +182,10 @@
     versions: listVersions,
     rollback: rollbackTo,
     categories(){ return Object.keys(META.categories); },
+    tables(){ return META.tableOrder.slice(); },
+    tableItems(t){ return (DATA[META.tableKeys[t]] || []).map(it => it.id); },
+    itemHistory: itemHistory,
+    restoreItem: restoreItem,
     exportJSON(){ return JSON.stringify(DATA, null, 2); },
     importJSON(text){
       const parsed = JSON.parse(text);

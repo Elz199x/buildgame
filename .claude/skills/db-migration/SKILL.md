@@ -20,7 +20,8 @@ description: เปลี่ยนสคีมา Postgres ของโปรเ
 3. ย้ายข้อมูลด้วย SQL ใน migration เดียวกัน และกันรันซ้ำ (`WHERE NOT EXISTS ...`)
 4. ตารางใหม่ที่มีเวอร์ชัน/ประวัติ: ใส่ดัชนีที่ตรงกับ query จริง
 5. อัปเดต `docs/DATABASE.md` (ตาราง/คอลัมน์/เหตุผล) และ `server/README.md` ถ้า API เปลี่ยน
-6. **เพิ่มหมวดข้อมูลเกมใหม่** (`gamedata.Categories`): ต้องมี migration ที่แก้ `CHECK (category IN (...))` ของ `game_config_versions` + ย้ายข้อมูลคีย์ที่เกี่ยวข้อง และแก้ SQL คัดลอกใน migration ให้สอดคล้อง
+6. **เพิ่มหมวดเอกสารใหม่** (`gamedata.Categories`): migration ที่แก้ `CHECK (category IN (...))` ของ `game_config_versions` + ย้ายคีย์ที่เกี่ยวข้อง · **เพิ่มตารางรายการใหม่** (`gamedata.Tables`): สร้างตาราง `game_*` (id, sort, FK, `data jsonb`, `version`, `updated_by/at` + `CHECK (data->>'id' = id)`), เพิ่มชื่อใน `CHECK` ของ `game_audit.entity`, และเพิ่มชื่อตารางใน `sqlTable`/`fkColumns` ที่ `server/internal/store/gamedata.go`
+7. migration ต้องรันได้ทั้งใน Go (ทรานแซกชันเดียว) และ `psql` ตอน `docker compose` สร้าง DB (autocommit ต่อคำสั่ง) — **ห้ามใช้ `CREATE TEMP TABLE ... ON COMMIT DROP`**, FK ที่ต้องย้ายข้อมูลวนกันใช้ `DEFERRABLE INITIALLY DEFERRED`
 
 ## ก่อนรัน migration กับ DB จริง
 - DB dev ของโปรเจกต์คือ container `catquest-db` พอร์ต **5433** — ห้ามแตะ `pg-main` (พอร์ต 5432) ที่ไม่ใช่ของโปรเจกต์

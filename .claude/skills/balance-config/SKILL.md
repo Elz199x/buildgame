@@ -6,15 +6,13 @@ description: ปรับค่า config/สมดุลเกม หรือ�
 # balance-config — แก้ค่าเกมให้ถูกที่
 
 ## หลักการ
-- **ข้อมูลเกมจริงอยู่ใน Postgres** ตาราง `game_config_versions` แยก 5 หมวด (`server/internal/gamedata/categories.go`)
+- **ข้อมูลเกมจริงอยู่ใน Postgres** 2 แบบ (`server/internal/gamedata/categories.go`):
 
-  | หมวด | คีย์ |
-  |---|---|
-  | `balance` | `formulaConfig`, `globals`, `rules` |
-  | `content` | `version`, `classes`, `branches`, `skills`, `weapons`, `statDefs` |
-  | `entities` | `monsters`, `equipItems`, `elementSystem` |
-  | `world` | `worldMap` |
-  | `tools` | `presets`, `builds`, `modelSlots` |
+  | ชนิด | ที่เก็บ | ส่วน | แก้อย่างไร |
+  |---|---|---|---|
+  | หมวดเอกสาร | `game_config_versions` (แถวละเวอร์ชันของหมวด) | `balance` = version/formulaConfig/globals/rules · `entities` = monsters/equipItems/elementSystem · `world` = worldMap · `tools` = presets/builds/modelSlots | `PUT /api/data/{หมวด}` + `If-Match` (ย้อนทั้งหมวด) |
+  | ตารางรายการ | `game_classes`, `game_branches`, `game_skills`, `game_weapons`, `game_stat_defs` (แถวละรายการ + FK + `version` ต่อแถว) + `game_audit` | classes · branches · skills · weapons · stats(statDefs) | `PUT/DELETE /api/tables/{ตาราง}/{id}` + `If-Match` (แก้/กู้ทีละรายการ) |
+
 - **ห้ามฝังตัวเลขกติกา/บาลานซ์ในโค้ด** (ไม่มี fallback) — ค่าที่ขาดต้องทำให้ `gamedata/validate.go` ปฏิเสธข้อมูล
 - ขีดจำกัดวิศวกรรม/กันโกง (ความเร็วสูงสุด, ขนาดคำขอ ฯลฯ) อยู่ในโค้ดได้ — ดูรายการใน `docs/DATA_SCHEMA.md` หัวข้อ `rules`
 

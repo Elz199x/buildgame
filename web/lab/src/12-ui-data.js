@@ -83,6 +83,19 @@
               h('div', { class:'row' }, catSel, sel, ui.confirmBtn('ย้อนหมวดนี้ไปเวอร์ชันนี้', () => { if(!sel.value) return; SL.store.rollback(catSel.value, sel.value).then(() => { ui.toast('ย้อนกลับแล้ว (สร้างเป็นเวอร์ชันใหม่)'); load(); }).catch(e => ui.toast(e.message)); }),
                 ui.confirmBtn('รีเซ็ตตัวละครทดสอบ', () => { SL.state.reset(); ui.toast('รีเซ็ตตัวละครแล้ว'); })), msg,
               h('div', { class:'tiny muted', style:{ marginTop:'6px' } }, 'ข้อมูลเกมเก็บในฐานข้อมูลเซิร์ฟเวอร์แยกเป็นหมวด — ย้อนทีละหมวด (สร้างเวอร์ชันใหม่ ไม่ลบประวัติ), ต้องสอดคล้องกับหมวดอื่น และต้องเป็นแอดมิน'));
+          })(),
+          (() => {
+            const tSel = h('select', { class:'sel' }), iSel = h('select', { class:'sel' }), hSel = h('select', { class:'sel' }), msg2 = h('span', { class:'small muted' }, '');
+            SL.store.tables().forEach(t => tSel.appendChild(h('option', { value: t }, t)));
+            const fillItems = () => { ui.clear(iSel); SL.store.tableItems(tSel.value).forEach(id => iSel.appendChild(h('option', { value: id }, id))); loadHist(); };
+            const loadHist = () => {
+              ui.clear(hSel); if(!iSel.value){ msg2.textContent = ''; return; } msg2.textContent = 'กำลังโหลดประวัติ…';
+              SL.store.itemHistory(tSel.value, iSel.value).then(es => { es.forEach(e => hSel.appendChild(h('option', { value: String(e.id) }, '#' + e.id + ' · ' + e.action + ' · ' + new Date(e.createdAt).toLocaleString() + ' · ' + (e.by || '-') + ' · ' + (e.note || '')))); msg2.textContent = es.length ? '' : 'ยังไม่มีประวัติ'; }).catch(e => { msg2.textContent = e.message; });
+            };
+            tSel.addEventListener('change', fillItems); iSel.addEventListener('change', loadHist); fillItems();
+            return h('div', { class:'panel' }, h('h3', 'ประวัติรายรายการ (อาชีพ/สาย/สกิล/อาวุธ/สเตตัส)'),
+              h('div', { class:'row' }, tSel, iSel, hSel, ui.confirmBtn('กู้รายการนี้ไปสถานะนี้', () => { if(!hSel.value) return; SL.store.restoreItem(tSel.value, iSel.value, hSel.value).then(() => { ui.toast('กู้คืนแล้ว (เป็นการแก้ครั้งใหม่ ประวัติเดิมไม่หาย)'); fillItems(); }).catch(e => ui.toast(e.message)); })), msg2,
+              h('div', { class:'tiny muted', style:{ marginTop:'6px' } }, 'แต่ละรายการมีเวอร์ชันของตัวเอง — แก้สกิลหนึ่งตัวไม่กระทบตัวอื่น; ผิดความสัมพันธ์ (เช่น สกิลชี้อาชีพที่ไม่มี) จะถูกปฏิเสธ'));
           })())));
       update();
     },

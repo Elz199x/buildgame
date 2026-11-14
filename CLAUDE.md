@@ -52,7 +52,7 @@ npm run lab:golden               # สร้าง golden test ของ Go (ห
 ## แผนที่ไฟล์เร็ว
 | อยากแก้ | ไปที่ |
 |---|---|
-| ข้อมูลเกมจริง (สกิล/คลาส/อาวุธ/มอนสเตอร์/บิลด์/formulaConfig/rules) | ตาราง `game_config_versions` ใน DB แยก 5 หมวด (balance/content/entities/world/tools — ดู `docs/DATABASE.md`; แก้ผ่านหน้าแอดมิน) · `server/internal/gamedata/seed/game-data.json` = ข้อมูลตั้งต้นของ DB ว่าง/เทสต์เท่านั้น |
+| ข้อมูลเกมจริง (สกิล/อาชีพ/สเตตัส/อาวุธ/มอนสเตอร์/formulaConfig/rules) | DB: อาชีพ·สาย·สกิล·อาวุธ·สเตตัส เป็น**ตารางเชิงสัมพันธ์รายรายการ** (`game_classes/branches/skills/weapons/stat_defs` + FK + `game_audit`); หมวดอื่น (balance/entities/world/tools) เป็นเอกสารเวอร์ชันใน `game_config_versions` — ดู `docs/DATABASE.md`; แก้ผ่านหน้าแอดมิน · `server/internal/gamedata/seed/game-data.json` = ข้อมูลตั้งต้นของ DB ว่าง/เทสต์เท่านั้น |
 | กติกาเรียนสกิล / validator | `03-rules.js` |
 | สูตรดาเมจ/สเตตัสสุดท้าย | `04-stats.js` |
 | ตัวจำลองต่อสู้ / rotation / benchmark (ต้นฉบับ JS; ใช้จริงบนเซิร์ฟเวอร์ Go) | `05-sim.js` |
@@ -67,14 +67,14 @@ npm run lab:golden               # สร้าง golden test ของ Go (ห
 ## หลังบ้าน (Go + Postgres) และหน้าเว็บ (Next.js)
 - **หลักการ: เซิร์ฟเวอร์เป็นเจ้าของ (server-authoritative)** — โหมดเกม (`characters.mode=game`, ค่าเริ่มต้น) ไคลเอนต์ห้ามคำนวณ/แก้ EXP ทอง ไอเทม เลเวล สกิล สเตตัส อุปกรณ์ เอง: ส่งคำสั่งผ่าน `SL.game.*` (`/api/game/*`) แล้ว `SL.state.applyServer` ตัวละครที่ได้กลับมา; `state.change` ในโหมดเกมย้อนค่าที่เซิร์ฟเวอร์เป็นเจ้าของ; หน้า DPS ใช้ `SL.sandbox` + `/api/sim/*` เท่านั้น — เพิ่มกติกาใหม่ที่ `server/internal/progress` ไม่ใช่ใน JS
 - โครงสร้าง: `server/cmd/gameserver` + `server/internal/{config,auth,store,gamedata,sim,progress,charsvc,game,protocol,realtime,httpapi}` + `server/migrations` — อ่าน `server/README.md` และ `docs/DATABASE.md` ก่อนแก้
-- หลังบ้านเป็น Go ล้วน — **ห้ามเพิ่มเซิร์ฟเวอร์ Node/อื่น**; ข้อมูลเกมอยู่ใน Postgres (`game_config_versions` แยก 5 หมวด) ตัวละครอยู่ใน `characters.state`; **สูตรสกิล/สเตตัส/ต่อสู้เป็นโค้ด** (ไม่เก็บใน DB) อยู่ที่ `server/internal/sim`
+- หลังบ้านเป็น Go ล้วน — **ห้ามเพิ่มเซิร์ฟเวอร์ Node/อื่น**; ข้อมูลเกมอยู่ใน Postgres (ตารางรายการ `game_skills` ฯลฯ + หมวดเอกสาร `game_config_versions`) ตัวละครอยู่ใน `characters.state`; **สูตรสกิล/สเตตัส/ต่อสู้เป็นโค้ด** (ไม่เก็บใน DB) อยู่ที่ `server/internal/sim`
 - **JS ↔ Go ต้องตรงกัน:** `internal/sim` พอร์ตจาก `web/lab/src/03-rules.js 04-stats.js 05-sim.js` — แก้สูตรฝั่ง JS แล้วต้อง `node web/lab/tools/gen-golden.js` และแก้ Go ให้ `go test ./internal/sim` ผ่าน (golden test เทียบทุกบิต) — สองคำสั่งนี้รันเมื่อผู้ใช้สั่งเท่านั้น ถ้ายังไม่สั่งให้แจ้งว่ายังไม่ได้สร้าง/ทดสอบ (ดู skill `js-go-parity`)
 - ตรวจฝั่ง Go (รันเมื่อผู้ใช้สั่งเท่านั้น — ดู `/run-checks`): `cd server && gofmt -l . && go vet ./... && go test ./...` (ตั้ง `TEST_DATABASE_URL` เพื่อรันเทสต์ที่ใช้ Postgres: ดู server/README.md) และ `govulncheck ./...` เมื่อแก้ dependency
 - เปลี่ยนสคีมา = เพิ่มไฟล์ใหม่ใน `server/migrations` (ห้ามแก้ไฟล์เก่า) ปิดท้ายด้วย INSERT ลง schema_migrations
 - โปรโตคอลไบนารี 0xC7 ต้องตรงกัน 3 ที่: `server/internal/protocol`, `web/lab/src/05b-net-codec.js`, `web/lib/codec.ts` (+ `docs/protocol/catquest_ro.fbs`; มี STATE_SYNC 0x24 / REWARD 0x25 ด้วย); decode ฝั่ง Go ต้องตรวจความยาวเฟรมเสมอ
 - ความปลอดภัย: ห้ามเก็บ/ส่งรหัสผ่านหรือโทเคนดิบ (เซสชันเก็บเฉพาะแฮช), ทุก API ผูกกับเซสชัน ห้ามรับ id ผู้ใช้จากไคลเอนต์, อินพุตจากไคลเอนต์ต้องตรวจขอบเขต/ขนาด, การเขียนข้อมูลส่วนกลางต้อง admin
 - `web/public/skill-lab/` สร้างอัตโนมัติจาก `web/lab/src` (`npm run sync:lab`, รันให้เองใน `npm run dev/build`) — **แก้ที่ web/lab/src เท่านั้น**; ถ้ารัน Next ด้วย `npx next dev` ตรง ๆ ต้องสั่ง sync เอง
-- `server/internal/gamedata/seed/game-data.json` ใช้ 2 อย่างเท่านั้น: ใส่ให้ DB ที่ว่างตอนเริ่มครั้งแรก และเป็นฟิกซ์เจอร์ของเทสต์/เครื่องมือ JS (`web/lab/tools/lab-env.js`, golden test) — **ไม่มี endpoint รีเซ็ตกลับ seed แล้ว** ย้อนค่าด้วย rollback รายหมวด (`POST /api/data/rollback/{หมวด}/{id}` หรือแผง "ประวัติเวอร์ชัน" ในหน้าข้อมูล); ปรับสมดุลของระบบที่ใช้งานอยู่ทำผ่านหน้าแอดมินเท่านั้น (อย่าแก้ seed)
+- `server/internal/gamedata/seed/game-data.json` ใช้ 2 อย่างเท่านั้น: ใส่ให้ DB ที่ว่างตอนเริ่มครั้งแรก และเป็นฟิกซ์เจอร์ของเทสต์/เครื่องมือ JS (`web/lab/tools/lab-env.js`, golden test) — **ไม่มี endpoint รีเซ็ตกลับ seed แล้ว** ย้อนค่าด้วย rollback รายหมวดเอกสาร (`POST /api/data/rollback/{หมวด}/{id}`) หรือกู้รายรายการ (`POST /api/tables/{ตาราง}/{id}/restore/{auditId}`) ผ่านแผงประวัติในหน้าข้อมูล; ปรับสมดุลของระบบที่ใช้งานอยู่ทำผ่านหน้าแอดมินเท่านั้น (อย่าแก้ seed)
 - stack: **gin** (HTTP) + **gorm** (DB, `ParameterizedQueries` เปิดไว้ กัน log รั่วแฮช) — ห้าม AutoMigrate ให้ใช้ไฟล์ migration
 - Docker: Postgres ของโปรเจกต์นี้คือ container `catquest-db` พอร์ต **5433** — เครื่องนี้มี Postgres อื่น (`pg-main` พอร์ต 5432) ที่ไม่ใช่ของโปรเจกต์ ห้ามแตะ
 - ตัวเรนเดอร์ตัวละคร/มอนสเตอร์ (`13-game-world.js`) ตรวจภาพได้ด้วย Playwright + `@napi-rs/canvas` (โหลดโมดูล 00–13 ใน Node แล้วเรียก `SL.rigRenderer.drawCharacter`)

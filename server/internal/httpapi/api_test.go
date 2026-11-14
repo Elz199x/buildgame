@@ -234,17 +234,20 @@ func TestProtectedEndpointsRequireLogin(t *testing.T) {
 	}
 }
 
-func metaVersions(t *testing.T, raw []byte) map[string]int64 {
+type dataMeta struct {
+	Versions map[string]int64            `json:"versions"`
+	Tables   map[string]map[string]int64 `json:"tables"`
+}
+
+func readMeta(t *testing.T, raw []byte) dataMeta {
 	t.Helper()
 	var doc struct {
-		Meta struct {
-			Versions map[string]int64 `json:"versions"`
-		} `json:"_meta"`
+		Meta dataMeta `json:"_meta"`
 	}
-	if err := json.Unmarshal(raw, &doc); err != nil || len(doc.Meta.Versions) == 0 {
-		t.Fatalf("ต้องมี _meta.versions: %v", err)
+	if err := json.Unmarshal(raw, &doc); err != nil || len(doc.Meta.Versions) == 0 || len(doc.Meta.Tables["skills"]) == 0 {
+		t.Fatalf("ต้องมี _meta.versions และ _meta.tables: %v", err)
 	}
-	return doc.Meta.Versions
+	return doc.Meta
 }
 
 func TestGameDataAdminOnlyAndVersioning(t *testing.T) {
@@ -258,16 +261,17 @@ func TestGameDataAdminOnlyAndVersioning(t *testing.T) {
 		t.Fatalf("ผู้เล่นทั่วไปอ่านข้อมูลเกมได้: %d", st)
 	}
 	etag := hdr.Get("ETag")
-	v1 := metaVersions(t, raw)
+	m1 := readMeta(t, raw)
 	if st, _, _ := player.do("GET", "/api/data", nil, map[string]string{"If-None-Match": etag}); st != 304 {
 		t.Fatalf("ETag ต้องให้ 304 ได้ %d", st)
 	}
-	for _, p := range [][2]string{{"PUT", "/api/data"}, {"PUT", "/api/data/world"}, {"GET", "/api/data/versions"}, {"POST", "/api/data/rollback/world/1"}} {
+	for _, p := range [][2]string{{"PUT", "/api/data"}, {"PUT", "/api/data/world"}, {"GET", "/api/data/versions"}, {"POST", "/api/data/rollback/world/1"},
+		{"PUT", "/api/tables/skills/swBash"}, {"DELETE", "/api/tables/skills/swBash"}, {"GET", "/api/tables/skills/swBash/history"}} {
 		if st, _, _ := player.do(p[0], p[1], string(raw), nil); st != 403 {
 			t.Errorf("ผู้เล่นทั่วไป %s %s ต้อง 403 ได้ %d", p[0], p[1], st)
 		}
 	}
-	// ข้อมูลเสียต้องถูกปฏิเสธและไม่เปลี่ยนเวอร์ชัน
+	// ข้อมูลเสียต้องถูกปฏิเสธและไม่เปลี่ยนอะไร
 	for name, body := range map[string]string{"ไม่ใช่ JSON": `{`, "ขาดหมวด": `{"classes":[]}`, "คีย์ที่ไม่รู้จัก": `{"hack":1}`} {
 		if st, _, _ := admin.do("PUT", "/api/data", body, nil); st != 400 {
 			t.Errorf("%s: ต้อง 400 ได้ %d", name, st)
@@ -279,10 +283,11 @@ func TestGameDataAdminOnlyAndVersioning(t *testing.T) {
 	if st, _, _ := admin.do("PUT", "/api/data/world", `{}`, nil); st != 428 {
 		t.Errorf("ไม่ส่ง If-Match ต้อง 428 ได้ %d", st)
 	}
-	if st, _, _ := admin.do("PUT", "/api/data/world", `{"classes":[]}`, map[string]string{"If-Match": itoa(int(v1["world"]))}); st != 400 {
+	ifm := func(v int64) map[string]string { return map[string]string{"If-Match": itoa(int(v))} }
+	if st, _, _ := admin.do("PUT", "/api/data/world", `{"classes":[]}`, ifm(m1.Versions["world"])); st != 400 {
 		t.Errorf("คีย์ผิดหมวดต้อง 400 ได้ %d", st)
 	}
-	if st, _, _ := admin.do("PUT", "/api/data/world", `{"worldMap":{}}`, map[string]string{"If-Match": itoa(int(v1["world"]))}); st != 400 {
+	if st, _, _ := admin.do("PUT", "/api/data/world", `{"worldMap":{}}`, ifm(m1.Versions["world"])); st != 400 {
 		t.Errorf("ข้อมูลหมวดที่ทำให้ระบบไม่สอดคล้องต้อง 400 ได้ %d", st)
 	}
 	_, _, h2 := admin.do("GET", "/api/data", nil, nil)
@@ -290,35 +295,33 @@ func TestGameDataAdminOnlyAndVersioning(t *testing.T) {
 		t.Fatal("ข้อมูลเสียห้ามเปลี่ยนเวอร์ชัน")
 	}
 
-	// แก้หมวด world ที่ถูกต้อง → เวอร์ชันใหม่เฉพาะหมวดนั้น + โลกเกมโหลดใหม่ทันที
+	// ---- หมวดเอกสาร world: แก้ → เวอร์ชันใหม่เฉพาะหมวดนั้น + โลกเกมโหลดใหม่ทันที ----
 	var doc map[string]any
 	_ = json.Unmarshal(raw, &doc)
 	wm := doc["worldMap"].(map[string]any)
 	wm["currentMapId"] = "none"
 	wm["spawns"] = wm["spawns"].([]any)[:2]
 	edited, _ := json.Marshal(map[string]any{"worldMap": wm})
-	ifm := map[string]string{"If-Match": itoa(int(v1["world"]))}
-	if st, body, _ := admin.do("PUT", "/api/data/world?note=trim+spawns", edited, ifm); st != 200 {
+	if st, body, _ := admin.do("PUT", "/api/data/world?note=trim+spawns", edited, ifm(m1.Versions["world"])); st != 200 {
 		t.Fatalf("admin แก้ข้อมูลไม่ได้: %d %s", st, body)
 	}
 	if _, _, mobs, _ := e.world.Counts(); mobs != 2 {
 		t.Fatalf("โลกเกมต้องมี 2 มอนสเตอร์ ได้ %d", mobs)
 	}
-	// ส่งด้วย If-Match เดิมซ้ำ = มีคนแก้ไปแล้ว → 409 (ไม่ทับ)
-	if st, _, _ := admin.do("PUT", "/api/data/world", edited, ifm); st != 409 {
+	if st, _, _ := admin.do("PUT", "/api/data/world", edited, ifm(m1.Versions["world"])); st != 409 {
 		t.Fatalf("If-Match เก่าต้อง 409 ได้ %d", st)
 	}
 	_, raw3, h3 := player.do("GET", "/api/data", nil, nil)
 	if h3.Get("ETag") == etag {
-		t.Fatal("ETag ต้องเปลี่ยนตามเวอร์ชัน")
+		t.Fatal("ETag ต้องเปลี่ยนตามเนื้อหา")
 	}
-	v3 := metaVersions(t, raw3)
-	if v3["world"] <= v1["world"] {
-		t.Fatalf("world ต้องได้เวอร์ชันใหม่: %v -> %v", v1, v3)
+	m3 := readMeta(t, raw3)
+	if m3.Versions["world"] <= m1.Versions["world"] {
+		t.Fatalf("world ต้องได้เวอร์ชันใหม่: %v -> %v", m1.Versions, m3.Versions)
 	}
-	for _, cat := range []string{"balance", "content", "entities", "tools"} {
-		if v3[cat] != v1[cat] {
-			t.Fatalf("หมวด %s ต้องไม่ถูกกระทบ: %v -> %v", cat, v1[cat], v3[cat])
+	for _, cat := range []string{"balance", "entities", "tools"} {
+		if m3.Versions[cat] != m1.Versions[cat] {
+			t.Fatalf("หมวด %s ต้องไม่ถูกกระทบ: %v -> %v", cat, m1.Versions[cat], m3.Versions[cat])
 		}
 	}
 	_, vraw, _ := admin.do("GET", "/api/data/versions?category=world", nil, nil)
@@ -330,7 +333,6 @@ func TestGameDataAdminOnlyAndVersioning(t *testing.T) {
 	if st, _, _ := admin.do("GET", "/api/data/versions?category=nope", nil, nil); st != 404 {
 		t.Fatalf("หมวดที่ไม่มีต้อง 404 ได้ %d", st)
 	}
-	// ย้อนหมวด world ไปเวอร์ชัน seed → มอนสเตอร์กลับมาครบ และเกิดเวอร์ชันใหม่ (ไม่ทับประวัติ)
 	seedID := int(versions[1]["id"].(float64))
 	if st, _, _ := admin.do("POST", "/api/data/rollback/world/"+itoa(seedID), nil, nil); st != 200 {
 		t.Fatalf("rollback: %d", st)
@@ -347,12 +349,88 @@ func TestGameDataAdminOnlyAndVersioning(t *testing.T) {
 	if st, _, _ := admin.do("POST", "/api/data/rollback/world/abc", nil, nil); st != 400 {
 		t.Fatalf("id ผิดรูปแบบต้อง 400 ได้ %d", st)
 	}
-	if st, _, _ := admin.do("POST", "/api/data/rollback/nope/1", nil, nil); st != 404 {
-		t.Fatalf("หมวดที่ไม่มีต้อง 404 ได้ %d", st)
-	}
-	// ไม่มี reset-to-seed ที่รันไทม์แล้ว (seed ใช้ตอน bootstrap DB ว่างเท่านั้น) — ย้อนด้วย rollback รายหมวด
 	if st, _, _ := admin.do("POST", "/api/data/reset", nil, nil); st != 404 {
 		t.Fatalf("ต้องไม่มี endpoint reset แล้ว ได้ %d", st)
+	}
+
+	// ---- ตารางรายการ skills: แก้ทีละสกิล ด้วย version ต่อแถว ----
+	var skillItem map[string]any
+	for _, x := range doc["skills"].([]any) {
+		if x.(map[string]any)["id"] == "swBash" {
+			skillItem = x.(map[string]any)
+		}
+	}
+	if skillItem == nil {
+		t.Fatal("ต้องมีสกิล swBash ในข้อมูลตั้งต้น")
+	}
+	rowV := m1.Tables["skills"]["swBash"]
+	skillItem["name"] = "ทดสอบรายสกิล"
+	body, _ := json.Marshal(skillItem)
+	if st, _, _ := admin.do("PUT", "/api/tables/skills/swBash", body, nil); st != 428 {
+		t.Fatalf("ไม่ส่ง If-Match/If-None-Match ต้อง 428 ได้ %d", st)
+	}
+	if st, _, _ := admin.do("PUT", "/api/tables/nope/x", body, ifm(1)); st != 404 {
+		t.Fatalf("ตารางที่ไม่มีต้อง 404 ได้ %d", st)
+	}
+	if st, _, _ := admin.do("PUT", "/api/tables/skills/swMagnum", body, ifm(rowV)); st != 400 {
+		t.Fatalf("id ในข้อมูลไม่ตรง URL ต้อง 400 ได้ %d", st)
+	}
+	if st, rb, _ := admin.do("PUT", "/api/tables/skills/swBash?note=rename", body, ifm(rowV)); st != 200 || jsonField(t, rb, "version") != float64(rowV+1) {
+		t.Fatalf("แก้สกิลต้องได้เวอร์ชัน %d: %d %s", rowV+1, st, rb)
+	}
+	if st, _, _ := admin.do("PUT", "/api/tables/skills/swBash", body, ifm(rowV)); st != 409 {
+		t.Fatalf("If-Match เก่าของแถวต้อง 409 ได้ %d", st)
+	}
+	_, raw4, _ := player.do("GET", "/api/data", nil, nil)
+	m4 := readMeta(t, raw4)
+	if m4.Tables["skills"]["swBash"] != rowV+1 || m4.Tables["skills"]["swMagnum"] != m1.Tables["skills"]["swMagnum"] {
+		t.Fatalf("แก้ swBash ต้องไม่กระทบสกิลอื่น: %v", m4.Tables["skills"])
+	}
+	// สร้างสกิลใหม่: ต้องส่ง If-None-Match: * และอ้างอาชีพที่มีจริง; อ้างอาชีพที่ไม่มี = 409
+	skillItem["id"] = "zzNew"
+	skillItem["class"] = "no_such_class"
+	bad, _ := json.Marshal(skillItem)
+	star := map[string]string{"If-None-Match": "*"}
+	if st, _, _ := admin.do("PUT", "/api/tables/skills/zzNew", bad, star); st != 409 {
+		t.Fatalf("สกิลที่ชี้อาชีพไม่มีต้อง 409 ได้ %d", st)
+	}
+	skillItem["class"] = "swordman"
+	good, _ := json.Marshal(skillItem)
+	if st, _, _ := admin.do("PUT", "/api/tables/skills/zzNew", good, star); st != 200 {
+		t.Fatalf("สร้างสกิลไม่สำเร็จ: %d", st)
+	}
+	if st, _, _ := admin.do("PUT", "/api/tables/skills/zzNew", good, star); st != 409 {
+		t.Fatalf("สร้างซ้ำต้อง 409 ได้ %d", st)
+	}
+	if st, _, _ := admin.do("DELETE", "/api/tables/classes/swordman", nil, ifm(1)); st != 409 {
+		t.Fatalf("ลบอาชีพที่ยังมีสกิลต้อง 409 ได้ %d", st)
+	}
+	if st, _, _ := admin.do("DELETE", "/api/tables/skills/zzNew", nil, nil); st != 428 {
+		t.Fatalf("ลบโดยไม่ส่ง If-Match ต้อง 428 ได้ %d", st)
+	}
+	if st, _, _ := admin.do("DELETE", "/api/tables/skills/zzNew", nil, ifm(1)); st != 200 {
+		t.Fatalf("ลบสกิลไม่สำเร็จ: %d", st)
+	}
+	// ประวัติและกู้คืน: swBash มี create (seed) + update; กู้ไปสถานะ create ได้ชื่อเดิมกลับมา
+	_, hraw, _ := admin.do("GET", "/api/tables/skills/swBash/history", nil, nil)
+	var hist []map[string]any
+	_ = json.Unmarshal(hraw, &hist)
+	if len(hist) != 2 || hist[0]["action"] != "update" || hist[0]["by"] != "boss" || hist[1]["action"] != "create" {
+		t.Fatalf("ประวัติ swBash: %s", hraw)
+	}
+	first := int(hist[1]["id"].(float64))
+	if st, _, _ := admin.do("POST", "/api/tables/skills/swBash/restore/"+itoa(first), nil, nil); st != 200 {
+		t.Fatalf("กู้คืนไม่สำเร็จ: %d", st)
+	}
+	_, raw5, _ := player.do("GET", "/api/data", nil, nil)
+	var doc5 struct {
+		Skills []map[string]any `json:"skills"`
+	}
+	_ = json.Unmarshal(raw5, &doc5)
+	for _, x := range doc5.Skills {
+		if x["id"] == "swBash" && x["name"] == "ทดสอบรายสกิล" {
+			t.Fatal("กู้คืนแล้วชื่อสกิลต้องกลับเป็นของเดิม")
+		}
 	}
 }
 

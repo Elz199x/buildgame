@@ -3,6 +3,8 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +18,7 @@ import (
 	"catquest-ro/server/internal/store"
 )
 
-// DataManager ถือข้อมูลเกมที่ใช้งานอยู่ (ประกอบจากทุกหมวดใน Postgres) + ตัวจำลองที่ผูกกับข้อมูลนั้น
+// DataManager ถือข้อมูลเกมที่ใช้งานอยู่ (ประกอบจากหมวดเอกสาร + ตารางรายการใน Postgres) + ตัวจำลองที่ผูกกับข้อมูลนั้น
 // และแจ้งโลกเกมเมื่อข้อมูลเปลี่ยน
 type DataManager struct {
 	db       *store.Store
@@ -26,28 +28,29 @@ type DataManager struct {
 	mu      sync.RWMutex
 	data    *gamedata.Data
 	eng     *sim.Engine
-	version int64            // id สูงสุดของทุกหมวด = "เวอร์ชันรวม" ใช้เป็น ETag
-	cats    map[string]int64 // id เวอร์ชันที่ใช้งานของแต่ละหมวด
-	payload []byte           // เอกสารข้อมูลเกม + _meta สำหรับส่งให้ไคลเอนต์ (แคชไว้จนกว่าข้อมูลเปลี่ยน)
+	version int64  // นับการโหลดข้อมูลใหม่ในโปรเซสนี้
+	payload []byte // เอกสารข้อมูลเกม + _meta สำหรับส่งให้ไคลเอนต์ (แคชไว้จนกว่าข้อมูลเปลี่ยน)
+	etag    string // แฮชของ payload (เปลี่ยนเมื่อเนื้อหาเปลี่ยนจริง ไม่ขึ้นกับจำนวนครั้งที่โหลด)
 }
 
 var (
 	ErrInvalidData = errors.New("ข้อมูลเกมไม่ถูกต้อง")
-	ErrUnknownCat  = errors.New("ไม่มีหมวดข้อมูลนี้")
+	ErrUnknownCat  = errors.New("ไม่มีหมวดหรือตารางข้อมูลนี้")
 	ErrConflict    = store.ErrConfigConflict
+	ErrRefs        = store.ErrRefIntegrity
 )
 
-// NewDataManager โหลดเวอร์ชันล่าสุดของทุกหมวดจากฐานข้อมูล (ถ้าว่างใส่ข้อมูลตั้งต้นก่อน)
+// NewDataManager โหลดข้อมูลเกมจากฐานข้อมูล (ถ้ายังไม่มีเลยใส่ข้อมูลตั้งต้นก่อน)
 func NewDataManager(ctx context.Context, db *store.Store) (*DataManager, error) {
-	parts, err := gamedata.SplitDoc(gamedata.Seed())
+	cfg, tables, err := gamedata.SplitDoc(gamedata.Seed())
 	if err != nil {
 		return nil, fmt.Errorf("ข้อมูลตั้งต้นในไบนารีใช้ไม่ได้: %w", err)
 	}
-	seed := make(map[string][]byte, len(parts))
-	for k, v := range parts {
-		seed[k] = v
+	seedCfg := make(map[string][]byte, len(cfg))
+	for k, v := range cfg {
+		seedCfg[k] = v
 	}
-	if err := db.SeedGameConfigIfEmpty(ctx, seed); err != nil {
+	if err := db.SeedGameDataIfEmpty(ctx, seedCfg, tables); err != nil {
 		return nil, fmt.Errorf("ใส่ข้อมูลเกมตั้งต้นไม่สำเร็จ: %w", err)
 	}
 	m := &DataManager{db: db}
@@ -57,47 +60,67 @@ func NewDataManager(ctx context.Context, db *store.Store) (*DataManager, error) 
 	return m, nil
 }
 
-// reload อ่านเวอร์ชันที่ใช้งานของทุกหมวดจาก DB แล้วสร้างข้อมูล/ตัวจำลองใหม่ (เรียกภายใต้ writeMu หรือตอนเริ่ม)
+// reload อ่านข้อมูลทั้งหมดจาก DB แล้วสร้างข้อมูล/ตัวจำลองใหม่ (เรียกภายใต้ writeMu หรือตอนเริ่ม)
 func (m *DataManager) reload(ctx context.Context) error {
-	rows, err := m.db.ActiveGameConfig(ctx)
+	cfgRows, tableRows, err := m.db.ActiveGameData(ctx)
 	if err != nil {
 		return err
 	}
-	parts := make(map[string][]byte, len(rows))
-	cats := make(map[string]int64, len(rows))
-	var maxID int64
-	for name, r := range rows {
-		parts[name] = r.Data
-		cats[name] = r.ID
-		if r.ID > maxID {
-			maxID = r.ID
-		}
+	cfg := make(map[string][]byte, len(cfgRows))
+	catVer := make(map[string]int64, len(cfgRows))
+	for name, r := range cfgRows {
+		cfg[name] = r.Data
+		catVer[name] = r.ID
 	}
-	raw, err := gamedata.ComposeDoc(parts)
+	items := make(map[string][]json.RawMessage, len(tableRows))
+	rowVer := make(map[string]map[string]int64, len(tableRows))
+	for name, rows := range tableRows {
+		rowVer[name] = make(map[string]int64, len(rows))
+		list := make([]json.RawMessage, len(rows))
+		for i, r := range rows {
+			list[i] = r.Data
+			rowVer[name][r.ID] = r.Version
+		}
+		items[name] = list
+	}
+	raw, err := gamedata.ComposeDoc(cfg, items)
 	if err != nil {
 		return err
 	}
 	d, err := gamedata.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("ข้อมูลเกม (เวอร์ชันรวม #%d) ใช้งานไม่ได้: %w", maxID, err)
+		return fmt.Errorf("ข้อมูลเกมใช้งานไม่ได้: %w", err)
 	}
-	payload, err := withMeta(d.Raw, cats)
+	payload, err := withMeta(d.Raw, catVer, rowVer)
 	if err != nil {
 		return err
 	}
+	h := sha256.Sum256(payload)
 	m.mu.Lock()
-	m.data, m.eng, m.version, m.cats, m.payload = d, sim.New(d), maxID, cats, payload
+	m.data, m.eng, m.payload, m.etag = d, sim.New(d), payload, hex.EncodeToString(h[:12])
+	m.version++
 	m.mu.Unlock()
 	return nil
 }
 
-// withMeta ใส่ _meta (เวอร์ชันของแต่ละหมวด + รายการคีย์ของหมวด) ท้ายเอกสาร เพื่อให้ไคลเอนต์ส่งแก้รายหมวดได้โดยไม่ฝังรายชื่อหมวด
-func withMeta(doc []byte, versions map[string]int64) ([]byte, error) {
+// withMeta ใส่ _meta ท้ายเอกสาร เพื่อให้ไคลเอนต์ส่งแก้ได้เฉพาะส่วนที่เปลี่ยนโดยไม่ฝังรายชื่อหมวด/ตารางในโค้ด
+//
+//	versions:    id เวอร์ชันของหมวดเอกสารแต่ละหมวด (ใช้เป็น If-Match ของ PUT /api/data/{หมวด})
+//	categories:  คีย์ในเอกสารที่อยู่ในแต่ละหมวด
+//	tables:      ตาราง → { id รายการ → เวอร์ชันของแถว } (ใช้เป็น If-Match ของ PUT /api/tables/{ตาราง}/{id})
+//	tableKeys:   ตาราง → คีย์ในเอกสาร (เรียงตามลำดับพึ่งพา)
+func withMeta(doc []byte, versions map[string]int64, rows map[string]map[string]int64) ([]byte, error) {
 	cats := map[string][]string{}
 	for _, c := range gamedata.Categories {
 		cats[c.Name] = c.Keys
 	}
-	meta, err := json.Marshal(map[string]any{"versions": versions, "categories": cats})
+	keys := map[string]string{}
+	order := make([]string, 0, len(gamedata.Tables))
+	for _, t := range gamedata.Tables {
+		keys[t.Name] = t.Key
+		order = append(order, t.Name)
+	}
+	meta, err := json.Marshal(map[string]any{"versions": versions, "categories": cats, "tables": rows, "tableKeys": keys, "tableOrder": order})
 	if err != nil {
 		return nil, err
 	}
@@ -121,21 +144,21 @@ func (m *DataManager) Current() (*gamedata.Data, *sim.Engine, int64) {
 	return m.data, m.eng, m.version
 }
 
-// Payload คืนเอกสารข้อมูลเกม (+ _meta) และเวอร์ชันรวม สำหรับ GET /api/data
-func (m *DataManager) Payload() ([]byte, int64) {
+// Payload คืนเอกสารข้อมูลเกม (+ _meta) และ ETag (แฮชของเนื้อหา) สำหรับ GET /api/data
+func (m *DataManager) Payload() ([]byte, string) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.payload, m.version
+	return m.payload, m.etag
 }
 
-// validateAll ประกอบทุกหมวดเป็นเอกสารเดียวแล้วตรวจ (โครงสร้าง + ค่า config ครบ + การอ้างอิงข้ามหมวด)
-func validateAll(all map[string][]byte) error {
+// validateAll ประกอบข้อมูลทั้งหมดเป็นเอกสารเดียวแล้วตรวจ (โครงสร้าง + ค่า config ครบ + การอ้างอิงข้ามส่วน)
+func validateAll(cfg map[string][]byte, tables map[string][]json.RawMessage) error {
 	for _, c := range gamedata.Categories {
-		if _, ok := all[c.Name]; !ok {
+		if _, ok := cfg[c.Name]; !ok {
 			return fmt.Errorf("ขาดหมวด %q", c.Name)
 		}
 	}
-	raw, err := gamedata.ComposeDoc(all)
+	raw, err := gamedata.ComposeDoc(cfg, tables)
 	if err != nil {
 		return err
 	}
@@ -143,80 +166,162 @@ func validateAll(all map[string][]byte) error {
 	return err
 }
 
-// Apply ตรวจ → บันทึกเฉพาะหมวดที่เปลี่ยน (ทรานแซกชันเดียว) → ใช้งานทันที (โลกเกมโหลดนิยามใหม่)
-// expect[หมวด] = id เวอร์ชันที่ไคลเอนต์เห็นล่าสุด (ไม่ตรง = ErrConflict)
-func (m *DataManager) Apply(ctx context.Context, changes map[string][]byte, expect map[string]int64, note, userID string) (map[string]int64, error) {
-	if len(changes) == 0 {
-		return map[string]int64{}, nil
+func invalid(err error) error { return fmt.Errorf("%w: %v", ErrInvalidData, err) }
+
+// validateItem ตรวจรายการของตารางทั้งชั้นเอกสาร (มี id) และชั้นคอลัมน์ (ชนิด/ค่า/ฟิลด์ที่ไม่รู้จัก) แล้วคืน JSON รูป canonical
+func validateItem(table, id string, raw []byte) ([]byte, error) {
+	b, err := gamedata.ValidateItem(table, id, raw)
+	if err != nil {
+		return nil, err
 	}
-	clean := make(map[string][]byte, len(changes))
-	for cat, raw := range changes {
-		if gamedata.CategoryByName(cat) == nil {
-			return nil, fmt.Errorf("%w: %s", ErrUnknownCat, cat)
-		}
-		b, err := gamedata.ValidatePart(cat, raw)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrInvalidData, err)
-		}
-		clean[cat] = b
+	return store.CanonItem(table, id, b)
+}
+
+// Save ตรวจ → บันทึกชุดการเปลี่ยนแปลง (ทรานแซกชันเดียว) → โหลดใหม่และใช้งานทันที (โลกเกมโหลดนิยามใหม่)
+func (m *DataManager) Save(ctx context.Context, in store.SaveInput) (store.SaveResult, error) {
+	if len(in.Config) == 0 && len(in.Ops) == 0 {
+		return store.SaveResult{ConfigIDs: map[string]int64{}, RowIDs: map[string]int64{}}, nil
 	}
-	if len(note) > 200 {
-		note = note[:200]
+	if len(in.Note) > 200 {
+		in.Note = in.Note[:200]
 	}
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()
-	ids, err := m.db.SaveGameConfig(ctx, clean, expect, note, userID, func(all map[string][]byte) error {
-		if err := validateAll(all); err != nil {
-			return fmt.Errorf("%w: %v", ErrInvalidData, err)
+	res, err := m.db.SaveGameData(ctx, in, func(cfg map[string][]byte, tables map[string][]json.RawMessage) error {
+		if err := validateAll(cfg, tables); err != nil {
+			return invalid(err)
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return store.SaveResult{}, err
 	}
 	if err := m.reload(ctx); err != nil {
-		return nil, err
+		return store.SaveResult{}, err
 	}
-	cats := make([]string, 0, len(ids))
-	for c := range ids {
+	cats := make([]string, 0, len(res.ConfigIDs))
+	for c := range res.ConfigIDs {
 		cats = append(cats, c)
 	}
 	sort.Strings(cats)
-	slog.Info("อัปเดตข้อมูลเกม", "categories", cats, "version", m.version, "note", note, "by", userID)
+	slog.Info("อัปเดตข้อมูลเกม", "categories", cats, "rows", len(res.RowIDs), "note", in.Note, "by", in.UserID)
 	if m.onChange != nil {
 		m.onChange(m.data)
 	}
-	return ids, nil
+	return res, nil
 }
 
-// Replace นำเข้าเอกสารทั้งชุด: เขียนเฉพาะหมวดที่ต่างจากที่ใช้งานอยู่ (ไม่ตรวจ If-Match — ใช้กับการนำเข้า/สคริปต์)
-func (m *DataManager) Replace(ctx context.Context, raw []byte, note, userID string) (map[string]int64, error) {
-	parts, err := gamedata.SplitDoc(raw)
+// ApplyCategory แก้หมวดเอกสารหนึ่งหมวด (expect = id เวอร์ชันที่ไคลเอนต์เห็นล่าสุด; ไม่ตรง = ErrConflict)
+func (m *DataManager) ApplyCategory(ctx context.Context, category string, raw []byte, expect int64, note, userID string) (int64, error) {
+	if gamedata.CategoryByName(category) == nil {
+		return 0, fmt.Errorf("%w: %s", ErrUnknownCat, category)
+	}
+	b, err := gamedata.ValidatePart(category, raw)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidData, err)
+		return 0, invalid(err)
+	}
+	res, err := m.Save(ctx, store.SaveInput{Config: map[string][]byte{category: b}, ConfigExpect: map[string]int64{category: expect}, Note: note, UserID: userID})
+	if err != nil {
+		return 0, err
+	}
+	return res.ConfigIDs[category], nil
+}
+
+// ApplyItem สร้าง/แก้รายการหนึ่งของตาราง (expect: 0 = ต้องยังไม่มี, >0 = ต้องเป็นเวอร์ชันนี้) คืนเวอร์ชันแถวใหม่
+func (m *DataManager) ApplyItem(ctx context.Context, table, id string, raw []byte, expect int64, note, userID string) (int64, error) {
+	if gamedata.TableByName(table) == nil {
+		return 0, fmt.Errorf("%w: %s", ErrUnknownCat, table)
+	}
+	b, err := validateItem(table, id, raw)
+	if err != nil {
+		return 0, invalid(err)
+	}
+	res, err := m.Save(ctx, store.SaveInput{Ops: []store.TableOp{{Table: table, ID: id, Data: b, Expect: &expect}}, Note: note, UserID: userID})
+	if err != nil {
+		return 0, err
+	}
+	return res.RowIDs[table+"/"+id], nil
+}
+
+// DeleteItem ลบรายการหนึ่งของตาราง (ถูกอ้างอิงอยู่ = ErrRefs)
+func (m *DataManager) DeleteItem(ctx context.Context, table, id string, expect int64, note, userID string) error {
+	if gamedata.TableByName(table) == nil {
+		return fmt.Errorf("%w: %s", ErrUnknownCat, table)
+	}
+	_, err := m.Save(ctx, store.SaveInput{Ops: []store.TableOp{{Table: table, ID: id, Delete: true, Expect: &expect}}, Note: note, UserID: userID})
+	return err
+}
+
+// Replace นำเข้าเอกสารทั้งชุด: เขียนเฉพาะส่วนที่ต่างจากที่ใช้งานอยู่ (ไม่ตรวจ If-Match — ใช้กับการนำเข้า/สคริปต์)
+// รายการของตารางที่หายไปจากเอกสารที่นำเข้าจะถูกลบ
+func (m *DataManager) Replace(ctx context.Context, raw []byte, note, userID string) (store.SaveResult, error) {
+	cfg, tables, err := gamedata.SplitDoc(raw)
+	if err != nil {
+		return store.SaveResult{}, invalid(err)
 	}
 	m.mu.RLock()
 	cur := m.data.Raw
 	m.mu.RUnlock()
-	curParts, err := gamedata.SplitDoc(cur)
+	curCfg, curTables, err := gamedata.SplitDoc(cur)
 	if err != nil {
-		return nil, err
+		return store.SaveResult{}, err
 	}
-	changes := map[string][]byte{}
-	for name, p := range parts {
+	in := store.SaveInput{Config: map[string][]byte{}, Note: note, UserID: userID}
+	for name, p := range cfg {
 		var a, b bytes.Buffer
-		if json.Compact(&a, p) != nil || json.Compact(&b, curParts[name]) != nil {
-			return nil, fmt.Errorf("%w: หมวด %s", ErrInvalidData, name)
+		if json.Compact(&a, p) != nil || json.Compact(&b, curCfg[name]) != nil {
+			return store.SaveResult{}, invalid(fmt.Errorf("หมวด %s ไม่ใช่ JSON", name))
 		}
 		if !bytes.Equal(a.Bytes(), b.Bytes()) {
-			changes[name] = a.Bytes()
+			in.Config[name] = a.Bytes()
 		}
 	}
-	return m.Apply(ctx, changes, nil, note, userID)
+	var upserts, deletes []store.TableOp
+	for _, t := range gamedata.Tables {
+		want := map[string]bool{}
+		have := map[string][]byte{}
+		for _, it := range curTables[t.Name] {
+			var h struct {
+				ID string `json:"id"`
+			}
+			_ = json.Unmarshal(it, &h)
+			var c bytes.Buffer
+			_ = json.Compact(&c, it)
+			have[h.ID] = c.Bytes()
+		}
+		for _, it := range tables[t.Name] {
+			b, err := validateItem(t.Name, "", it)
+			if err != nil {
+				return store.SaveResult{}, invalid(err)
+			}
+			var h struct {
+				ID string `json:"id"`
+			}
+			_ = json.Unmarshal(b, &h)
+			if want[h.ID] {
+				return store.SaveResult{}, invalid(fmt.Errorf("id ซ้ำใน %s: %s", t.Name, h.ID))
+			}
+			want[h.ID] = true
+			if !bytes.Equal(have[h.ID], b) {
+				upserts = append(upserts, store.TableOp{Table: t.Name, ID: h.ID, Data: b})
+			}
+		}
+		for id := range have {
+			if !want[id] {
+				deletes = append(deletes, store.TableOp{Table: t.Name, ID: id, Delete: true})
+			}
+		}
+	}
+	// ลบรายการที่ถูกอ้างอิงก่อน (ตารางท้ายลำดับพึ่งพาก่อน) แล้วค่อยสร้าง/แก้ตามลำดับพึ่งพา
+	for i := len(deletes) - 1; i >= 0; i-- {
+		in.Ops = append(in.Ops, deletes[i])
+	}
+	in.Ops = append(in.Ops, upserts...)
+	return m.Save(ctx, in)
 }
 
-// Rollback ย้อนหมวดหนึ่งไปเป็นข้อมูลของเวอร์ชันที่เลือก (สร้างเป็นเวอร์ชันใหม่ ไม่ลบประวัติ; ตรวจความสอดคล้องกับหมวดอื่นก่อน)
-func (m *DataManager) Rollback(ctx context.Context, category string, versionID int64, userID string) (int64, error) {
+// RollbackCategory ย้อนหมวดเอกสารไปเป็นข้อมูลของเวอร์ชันที่เลือก (สร้างเป็นเวอร์ชันใหม่ ไม่ลบประวัติ; ตรวจความสอดคล้องก่อน)
+func (m *DataManager) RollbackCategory(ctx context.Context, category string, versionID int64, userID string) (int64, error) {
 	if gamedata.CategoryByName(category) == nil {
 		return 0, fmt.Errorf("%w: %s", ErrUnknownCat, category)
 	}
@@ -224,9 +329,29 @@ func (m *DataManager) Rollback(ctx context.Context, category string, versionID i
 	if err != nil {
 		return 0, err
 	}
-	ids, err := m.Apply(ctx, map[string][]byte{category: row.Data}, nil, "rollback to #"+strconv.FormatInt(versionID, 10), userID)
+	res, err := m.Save(ctx, store.SaveInput{Config: map[string][]byte{category: row.Data}, Note: "rollback to #" + strconv.FormatInt(versionID, 10), UserID: userID})
 	if err != nil {
 		return 0, err
 	}
-	return ids[category], nil
+	return res.ConfigIDs[category], nil
+}
+
+// RestoreItem กู้รายการของตารางไปเป็นสถานะตามบรรทัดประวัติที่เลือก (ถ้ารายการถูกลบไปแล้วจะสร้างกลับ)
+func (m *DataManager) RestoreItem(ctx context.Context, table, id string, auditID int64, userID string) (int64, error) {
+	if gamedata.TableByName(table) == nil {
+		return 0, fmt.Errorf("%w: %s", ErrUnknownCat, table)
+	}
+	snap, err := m.db.AuditSnapshot(ctx, table, id, auditID)
+	if err != nil {
+		return 0, err
+	}
+	b, err := validateItem(table, id, snap)
+	if err != nil {
+		return 0, invalid(err)
+	}
+	res, err := m.Save(ctx, store.SaveInput{Ops: []store.TableOp{{Table: table, ID: id, Data: b}}, Note: "restore from audit #" + strconv.FormatInt(auditID, 10), UserID: userID})
+	if err != nil {
+		return 0, err
+	}
+	return res.RowIDs[table+"/"+id], nil
 }
